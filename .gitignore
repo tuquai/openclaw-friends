@@ -1,0 +1,27 @@
+# dependencies
+node_modules
+
+# next.js
+.next
+next-env.d.ts
+
+# vercel
+.vercel
+
+# env
+.env
+.env*.local
+
+# data (runtime-generated)
+data/characters.json
+data/discord-config.json
+data/discord-runtime-locks/
+
+# uploads (keep dir via .gitkeep)
+public/uploads/*
+!public/uploads/.gitkeep
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
