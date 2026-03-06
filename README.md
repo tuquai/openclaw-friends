@@ -47,7 +47,7 @@
 - **用户关系问卷** — 收集双方信息，让 LLM 推断更真实的关系叙事
 - **Blueprint 生成** — 通过 OpenAI Responses API 生成角色包（IDENTITY / SOUL / USER / MEMORY）
 - **Workspace 同步 + OpenClaw 注册** — 一键生成 workspace 并注册到 OpenClaw，平台自动管理 Bot 运行和 @mention 路由
-- **TUQU 图片生成** — 角色自拍、场景照片等图片生成能力
+- **TuQu AI 人像生成** — 基于角色外貌生成高质量自拍、写真、场景照片，让角色真正"活"起来
 - **本地调试 Bot** — 内置 discord.js + OpenAI 的本地 Bot，仅用于开发调试
 
 ---
@@ -62,6 +62,7 @@
 | **npm** | v9+ | 随 Node.js 一起安装 |
 | **Git** | 任意 | 克隆仓库 |
 | **OpenAI API Key** | — | 用于 Blueprint 生成（需支持 `gpt-4.1` 或指定模型） |
+| **TuQu Service Key** | — | 用于 AI 人像生成（角色自拍/写真），[前往注册](https://billing.tuqu.ai/dream-weaver/login) |
 | **OpenClaw CLI**（可选） | — | 如果需要让平台接管 Discord Bot 运行 |
 
 ### 第一步：克隆仓库
@@ -152,7 +153,34 @@ npm run lint     # 代码检查
 - `USER.md` — 用户信息与关系叙事
 - `MEMORY.md` — 初始记忆
 
-### 4. 配置 Discord 绑定
+### 4. 配置 TuQu AI 人像服务（重要）
+
+角色之所以能在聊天中发送"自拍"、"写真"、"场景照片"，靠的就是 [TuQu AI 人像](https://billing.tuqu.ai/dream-weaver/login) 的图片生成能力。TuQu 提供业界领先的 AI 人像生成服务——只需一张角色参考照片，即可生成风格多变、表情自然、保持人物一致性的高质量人像照片，支持 2K 分辨率和多种画幅比例，效果远超普通文生图。角色的"活人感"很大程度上来自这里。
+
+配置步骤：
+
+**第一步：注册 TuQu 账号**
+
+前往 [TuQu 控制台](https://billing.tuqu.ai/dream-weaver/login) 注册账号。
+
+**第二步：选择套餐充值**
+
+登录后在控制台选择适合的套餐进行充值。TuQu 支持微信支付和 Stripe 国际支付，充值后即获得对应的图片生成额度。
+
+**第三步：创建 Service Key**
+
+在控制台中创建一个 Service Key。这是调用 TuQu API 的唯一凭证，请妥善保管。
+
+**第四步：将 Service Key 配置给角色**
+
+有两种方式：
+
+- **在 Character Designer UI 中配置**（推荐）：选中角色后，在 **"TuQu AI 配置"** 面板中填入 Service Key，点击保存即可。系统会自动将 Key 同步到角色的 workspace 中。
+- **在聊天中告诉角色**：如果角色已在 Discord 上线，你也可以直接把 Service Key 发送给角色，角色会自行保存并开始使用。
+
+配置完成后，角色就具备了拍照能力。在 Discord 对话中对角色说"拍张自拍"、"来张写真"之类的话，角色会自动调用 TuQu 生成一张保持人物外貌一致性的照片并发送出来。
+
+### 5. 配置 Discord 绑定
 
 为角色配置 Discord Bot：
 
@@ -160,7 +188,7 @@ npm run lint     # 代码检查
 - 在 Designer 中填写 Guild ID、Channel ID、User ID 和 Bot Token
 - 点击 **"保存 Discord 配置"**
 
-### 5. 同步 Workspace
+### 6. 同步 Workspace
 
 点击 **"同步 OpenClaw Workspace"**，系统会：
 
@@ -169,7 +197,7 @@ npm run lint     # 代码检查
 3. 安装技能（角色自拍、TUQU 模板/风格、充值、Gateway 恢复）
 4. 如果角色已配置 Discord 绑定，自动注册到 OpenClaw 平台
 
-### 6. OpenClaw 接管
+### 7. OpenClaw 接管
 
 注册完成后，OpenClaw 平台会：
 
@@ -303,8 +331,19 @@ npm run lint     # 代码检查
 - **Runtime**: Node.js 18+
 - **LLM**: OpenAI Responses API (gpt-4.1)
 - **Discord**: discord.js v14
-- **Image**: TUQU API
+- **Image**: [TuQu AI](https://billing.tuqu.ai/dream-weaver/login) — 高质量 AI 人像生成
 - **Language**: TypeScript 5.8
+
+## 社区与交流
+
+欢迎加入社区，交流角色设计心得、获取最新动态、反馈问题或提出建议：
+
+- **Discord**：[加入 TuQu AI 官方 Discord](https://discord.gg/Y5EExWtP)
+- **微信群**：扫码加入讨论群
+
+<p align="center">
+  <img src="public/wechat_group.jpg" alt="微信讨论群" width="300" />
+</p>
 
 ## License
 
