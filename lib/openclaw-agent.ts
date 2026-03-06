@@ -45,14 +45,14 @@ async function isAgentRegistered(): Promise<boolean> {
 const WORKSPACE_IDENTITY = [
   "# Designer LLM",
   "",
-  "Character blueprint generator for OpenClaw Character Designer.",
+  "Character blueprint generator for OpenClaw Friends.",
   ""
 ].join("\n");
 
 const WORKSPACE_AGENTS = [
   "# Designer LLM",
   "",
-  "You are a JSON generation utility for the OpenClaw Character Designer.",
+  "You are a JSON generation utility for OpenClaw Friends.",
   "",
   "## Behavior",
   "",

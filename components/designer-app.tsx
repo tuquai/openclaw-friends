@@ -1194,7 +1194,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             <h4>Discord 绑定</h4>
             <div className="form-grid">
               <div className="field">
-                <label htmlFor="discord-guild-id">Guild ID</label>
+                <label htmlFor="discord-guild-id">Server ID</label>
                 <input
                   id="discord-guild-id"
                   onChange={(event) => handleDiscordDraftChange("guildId", event.target.value)}
@@ -1527,7 +1527,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
       <section className="hero">
         <div className="hero-grid">
           <div>
-            <h1>OpenClaw Character Designer</h1>
+            <h1>OpenClaw Friends</h1>
             <p>
               这一版把“直接填 MBTI + 粗糙关系标签”改成了“更一般的性格问题 + 世界观 + 好感路线”。
               目标不是做心理测试，而是给角色和关系一个更自然的起点。

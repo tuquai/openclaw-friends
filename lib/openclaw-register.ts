@@ -169,7 +169,7 @@ export async function registerCharacterInOpenClaw(character: CharacterRecord) {
     discordLink.guildId
   );
   if (!guildId) {
-    throw new Error("Unable to resolve Discord guildId from the current channelId. Please provide guildId.");
+    throw new Error("Unable to resolve Discord Server ID from the current Channel ID. Please provide Server ID.");
   }
 
   const { configPath, config } = await readOpenClawConfig();

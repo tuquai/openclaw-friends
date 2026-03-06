@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenClaw Character Designer",
+  title: "OpenClaw Friends",
   description: "Design believable OpenClaw characters with lightweight forms and LLM-assisted personality synthesis."
 };
 

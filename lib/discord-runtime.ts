@@ -397,7 +397,9 @@ async function handlePhotoRequest(
     return;
   }
 
-  await message.channel.send({ files: [imageUrl] });
+  if ("send" in message.channel) {
+    await message.channel.send({ files: [imageUrl] });
+  }
   await appendConversationMemory(character, message.author.username, userText, `${scene.chatReply} [\u56fe\u7247]`);
 }
 

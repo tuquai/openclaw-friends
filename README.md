@@ -185,7 +185,7 @@ npm run lint     # 代码检查
 为角色配置 Discord Bot：
 
 - 创建一个 [Discord Bot](https://discord.com/developers/applications) 并获取 Bot Token
-- 在 Designer 中填写 Guild ID、Channel ID、User ID 和 Bot Token
+- 在 Designer 中填写 Server ID、Channel ID、User ID 和 Bot Token
 - 点击 **"保存 Discord 配置"**
 
 ### 6. 同步 Workspace
