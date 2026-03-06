@@ -45,7 +45,7 @@
 - **照片上传** — 上传角色主照片，自动同步到 workspace 头像
 - **MBTI 快速预设** — 用 MBTI 给角色奠定人格底色
 - **用户关系问卷** — 收集双方信息，让 LLM 推断更真实的关系叙事
-- **Blueprint 生成** — 通过 OpenAI Responses API 生成角色包（IDENTITY / SOUL / USER / MEMORY）
+- **Blueprint 生成** — 优先通过 OpenClaw 注入的 `designer-llm` agent 生成角色包；不可用时回退到 OpenAI Responses API
 - **Workspace 同步 + OpenClaw 注册** — 一键生成 workspace 并注册到 OpenClaw，平台自动管理 Bot 运行和 @mention 路由
 - **TuQu AI 人像生成** — 基于角色外貌生成高质量自拍、写真、场景照片，让角色真正"活"起来
 - **本地调试 Bot** — 内置 discord.js + OpenAI 的本地 Bot，仅用于开发调试
@@ -61,7 +61,7 @@
 | **Node.js** | v18+ | 推荐 v22 LTS |
 | **npm** | v9+ | 随 Node.js 一起安装 |
 | **Git** | 任意 | 克隆仓库 |
-| **OpenAI API Key** | — | 用于 Blueprint 生成（需支持 `gpt-4.1` 或指定模型） |
+| **OpenAI API Key** | — | 仅在 OpenClaw Gateway / `designer-llm` 不可用时，作为 Blueprint 生成回退 |
 | **TuQu Service Key** | — | 用于 AI 人像生成（角色自拍/写真），[前往注册](https://billing.tuqu.ai/dream-weaver/login) |
 | **OpenClaw CLI**（可选） | — | 如果需要让平台接管 Discord Bot 运行 |
 
@@ -146,7 +146,7 @@ npm run lint     # 代码检查
 
 ### 3. 生成 Blueprint
 
-点击 **"生成并预览角色信息"**，系统通过 OpenAI Responses API 生成完整的角色包：
+点击 **"生成并预览角色信息"**，系统优先通过 OpenClaw 的 `designer-llm` agent 生成完整角色包；如果 Gateway 不可用，再回退到 OpenAI Responses API：
 
 - `IDENTITY.md` — 角色身份与基本设定
 - `SOUL.md` — 角色灵魂：语气、偏好、情绪习惯、边界
@@ -185,7 +185,7 @@ npm run lint     # 代码检查
 为角色配置 Discord Bot：
 
 - 创建一个 [Discord Bot](https://discord.com/developers/applications) 并获取 Bot Token
-- 在 Designer 中填写 Server ID、Channel ID、User ID 和 Bot Token
+- 在 Designer 中填写 Channel ID、你的 User ID、Bot Token；Server ID 可留空自动解析
 - 点击 **"保存 Discord 配置"**
 
 ### 6. 同步 Workspace
@@ -212,9 +212,9 @@ npm run lint     # 代码检查
 
 ### OpenClaw Gateway
 
-如果本地安装了 [OpenClaw CLI](https://github.com/nicepkg/openclaw)，Designer 启动时会自动检测 Gateway 是否可用：
+如果本地安装了 [OpenClaw CLI](https://github.com/nicepkg/openclaw)，Designer 启动时会自动检测 Gateway 是否可用，并确保默认的 `designer-llm` agent 已注册：
 
-- **Gateway 可用**：Blueprint 生成优先走 Gateway（通过 `openclaw gateway call` 命令），不消耗你的 OpenAI API 额度
+- **Gateway 可用**：Blueprint 生成优先走 OpenClaw 的 `designer-llm` agent，不消耗你的 OpenAI API 额度
 - **Gateway 不可用**：回退到 `.env` 中配置的 `OPENAI_API_KEY`
 
 检测逻辑在 `instrumentation.ts` 中，启动时执行 `openclaw gateway call health` 探测。

@@ -42,7 +42,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return new NextResponse(data, {
         headers: {
           "Content-Type": MIME_MAP[ext] || "image/jpeg",
-          "Cache-Control": "public, max-age=3600"
+          "Cache-Control": "no-store"
         }
       });
     }
@@ -56,7 +56,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       return new NextResponse(data, {
         headers: {
           "Content-Type": MIME_MAP[ext] || "image/jpeg",
-          "Cache-Control": "public, max-age=3600"
+          "Cache-Control": "no-store"
         }
       });
     } catch {

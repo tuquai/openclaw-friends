@@ -349,8 +349,40 @@ async function ensureStorage() {
   try {
     await fs.access(dataFile);
   } catch {
-    await fs.writeFile(dataFile, JSON.stringify([seedCharacter], null, 2), "utf8");
+    await fs.writeFile(dataFile, JSON.stringify([], null, 2), "utf8");
+    return;
   }
+
+  try {
+    const raw = JSON.parse(await fs.readFile(dataFile, "utf8")) as LegacyCharacterRecord[];
+    if (raw.length === 1 && isLegacyDefaultSeedCharacter(raw[0])) {
+      await fs.writeFile(dataFile, JSON.stringify([], null, 2), "utf8");
+    }
+  } catch {
+    // Keep the existing file untouched if it is malformed; a later read will surface the real error.
+  }
+}
+
+function isLegacyDefaultSeedCharacter(raw: LegacyCharacterRecord) {
+  return (
+    raw.id === seedCharacter.id &&
+    raw.name === seedCharacter.name &&
+    raw.age === seedCharacter.age &&
+    raw.gender === seedCharacter.gender &&
+    raw.occupation === seedCharacter.occupation &&
+    raw.heritage === seedCharacter.heritage &&
+    raw.worldSetting === seedCharacter.worldSetting &&
+    raw.concept === seedCharacter.concept &&
+    raw.mbti === seedCharacter.mbti &&
+    raw.preset === seedCharacter.preset &&
+    raw.createdAt === seedCharacter.createdAt &&
+    raw.updatedAt === seedCharacter.updatedAt &&
+    Array.isArray(raw.photos) &&
+    raw.photos.length === 0 &&
+    !raw.workspacePath &&
+    !raw.discordLink &&
+    !raw.tuquConfig
+  );
 }
 
 function normalizePersonality(raw?: Partial<PersonalityAxes>, fallbackMbti?: string): PersonalityAxes {

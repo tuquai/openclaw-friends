@@ -113,10 +113,15 @@ function characterPreview(character: CharacterRecord) {
   ).trim();
 }
 
+function characterAvatarSrc(character: Pick<CharacterRecord, "id" | "updatedAt">) {
+  const query = character.updatedAt ? `?v=${encodeURIComponent(character.updatedAt)}` : "";
+  return `/api/characters/${character.id}/avatar${query}`;
+}
+
 export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const [characters, setCharacters] = useState(initialCharacters);
   const [selectedId, setSelectedId] = useState(initialCharacters[0]?.id ?? "");
-  const [viewMode, setViewMode] = useState<DesignerViewMode>("browse");
+  const [viewMode, setViewMode] = useState<DesignerViewMode>(initialCharacters.length ? "browse" : "edit");
   const [draft, setDraft] = useState(initialDraft);
   const [questionnaire, setQuestionnaire] = useState(initialQuestionnaire);
   const [discordLinkDraft, setDiscordLinkDraft] = useState<DiscordLink>(emptyDiscordLink());
@@ -886,21 +891,21 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
             <ChoiceField
               field={questionnaire.communicationPreference}
-              label="你喜欢对方怎么沟通"
+              label="你更喜欢对方用什么方式和你沟通"
               onChange={(field, value) => handleSingleChoiceChange("communicationPreference", field, value)}
               options={QUESTION_OPTIONS.communicationPreference}
             />
 
             <ChoiceField
               field={questionnaire.desiredBond}
-              label="你想要的关系气质"
+              label="你希望你们之间是什么样的相处感觉"
               onChange={(field, value) => handleSingleChoiceChange("desiredBond", field, value)}
               options={QUESTION_OPTIONS.desiredBond}
             />
 
             <CheckboxField
               field={questionnaire.treatmentPreference}
-              label="你更希望如何被对待"
+              label="你更希望对方怎么对待你"
               onCustomChange={(value) => handleMultiChoiceCustomChange("treatmentPreference", value)}
               onToggle={(value) => handleMultiChoiceToggle("treatmentPreference", value)}
               options={QUESTION_OPTIONS.treatmentPreference}
@@ -908,7 +913,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
             <CheckboxField
               field={questionnaire.specialTraits}
-              label="你愿意让角色带哪些奇怪属性"
+              label="你愿意让角色带哪些属性"
               onCustomChange={(value) => handleMultiChoiceCustomChange("specialTraits", value)}
               onToggle={(value) => handleMultiChoiceToggle("specialTraits", value)}
               options={QUESTION_OPTIONS.specialTraits}
@@ -1003,7 +1008,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                   type="button"
                 >
                   {character.photos[0] ? (
-                    <img alt={character.name} className="thumb" src={`/api/characters/${character.id}/avatar`} />
+                    <img alt={character.name} className="thumb" src={characterAvatarSrc(character)} />
                   ) : (
                     <div className="thumb thumb-placeholder">{character.name.slice(0, 1)}</div>
                   )}
@@ -1161,8 +1166,8 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                   {draft.photos.map((photo, idx) => (
                     <img
                       alt="uploaded"
-                      key={photo}
-                      src={selectedId && idx === 0 ? `/api/characters/${selectedId}/avatar` : photo}
+                      key={`${photo}-${idx}`}
+                      src={photo}
                     />
                   ))}
                 </div>
@@ -1198,17 +1203,17 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                 <input
                   id="discord-guild-id"
                   onChange={(event) => handleDiscordDraftChange("guildId", event.target.value)}
-                  placeholder="可选；留空时尝试从 channel id 自动解析"
+                  placeholder="可选；留空时会尝试从 Channel ID 自动解析"
                   value={discordLinkDraft.guildId ?? ""}
                 />
               </div>
 
               <div className="field">
-                <label htmlFor="discord-channel-id">Channel ID（可选）</label>
+                <label htmlFor="discord-channel-id">Channel ID</label>
                 <input
                   id="discord-channel-id"
                   onChange={(event) => handleDiscordDraftChange("channelId", event.target.value)}
-                  placeholder="可选；填了则在该 channel 内不用 @ 也自动回复"
+                  placeholder="OpenClaw 绑定目标频道；当前接管模式下频道内仍需 @mention"
                   value={discordLinkDraft.channelId}
                 />
               </div>
@@ -1218,7 +1223,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                 <input
                   id="discord-user-id"
                   onChange={(event) => handleDiscordDraftChange("userId", event.target.value)}
-                  placeholder="目标用户 id"
+                  placeholder="你的 Discord 用户 ID；只允许这个账号和角色交互"
                   value={discordLinkDraft.userId}
                 />
               </div>
@@ -1617,9 +1622,11 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
       ) : (
         <section className="editor-page">
           <div className="editor-page-header">
-            <button className="button-ghost" onClick={goBackToBrowse} type="button">
-              返回
-            </button>
+            {characters.length ? (
+              <button className="button-ghost" onClick={goBackToBrowse} type="button">
+                返回
+              </button>
+            ) : null}
             <div>
               <strong>{selected ? `正在编辑：${selected.name}` : "正在创建新角色"}</strong>
               <div className="status">保存后可返回角色页查看详情。</div>
