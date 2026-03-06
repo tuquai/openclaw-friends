@@ -842,7 +842,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                     userNameForRole: event.target.value
                   }))
                 }
-                placeholder="例如：Yizhou、周一舟、哥哥、主人"
+                placeholder="例如：admin、周一舟、哥哥、主人"
                 value={questionnaire.userNameForRole}
               />
             </div>

@@ -263,10 +263,51 @@ function ensureBlueprintDetailsInFiles(blueprint: BlueprintPackage, questionnair
   };
 }
 
+function buildOpenClawComposeMessage(payload: ComposePayload): string {
+  return [
+    "Generate a character blueprint package. Follow these instructions exactly.",
+    "",
+    "## Design Instructions",
+    buildSystemPrompt(),
+    "",
+    "## Character Input",
+    buildUserPrompt(payload),
+    "",
+    "## Output Schema",
+    "Your response must be a single valid JSON object with this exact structure:",
+    JSON.stringify(schema.schema, null, 2),
+    "",
+    "## Critical Rules",
+    "- Output ONLY the JSON object. No markdown code fences, no explanations, no text before or after the JSON.",
+    "- Every required field must be present.",
+    "- All content in Chinese except unavoidable file headings like IDENTITY.md and SOUL.md."
+  ].join("\n");
+}
+
+function stripCodeFences(text: string): string {
+  return text.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+}
+
 export async function composeCharacter(payload: ComposePayload) {
+  try {
+    const { isOpenClawAvailable, sendToDesignerAgent } = await import("@/lib/openclaw-agent");
+    if (await isOpenClawAvailable()) {
+      const message = buildOpenClawComposeMessage(payload);
+      const rawText = await sendToDesignerAgent(message);
+      const blueprint = JSON.parse(stripCodeFences(rawText)) as BlueprintPackage;
+      return ensureBlueprintDetailsInFiles(blueprint, payload.questionnaire);
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[composeCharacter] OpenClaw failed, falling back to OpenAI: ${detail}`);
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY");
+    throw new Error(
+      "Blueprint generation requires either a running OpenClaw Gateway or OPENAI_API_KEY. " +
+      "Start the Gateway with `openclaw gateway run` or set OPENAI_API_KEY in .env."
+    );
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
