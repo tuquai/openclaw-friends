@@ -1564,6 +1564,31 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
         </div>
       </section>
 
+      {viewMode === "browse" ? (
+        <section className="panel-grid">
+          {renderCharactersPanel()}
+          {renderDetailPanel()}
+        </section>
+      ) : (
+        <section className="editor-page">
+          <div className="editor-page-header">
+            {characters.length ? (
+              <button className="button-ghost" onClick={goBackToBrowse} type="button">
+                返回
+              </button>
+            ) : null}
+            <div>
+              <strong>{selected ? `正在编辑：${selected.name}` : "正在创建新角色"}</strong>
+              <div className="status">保存后可返回角色页查看详情。</div>
+            </div>
+          </div>
+          <section className="panel-grid">
+            {renderEditorPanel()}
+            {renderQuestionnairePanel()}
+          </section>
+        </section>
+      )}
+
       <section className="panel">
         <div className="panel-inner stack">
           <div className="panel-title">
@@ -1572,7 +1597,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
               <p>
                 保存 Discord 配置并同步 Workspace 后，OpenClaw 会自动接管所有角色 bot 的运行和 @mention 路由。
                 <br />
-                下方的本地启动仅用于调试——直接在 Designer 进程内运行 bot，不经过 OpenClaw。
+                下方的本地启动仅用于调试，直接在 Designer 进程内运行 bot，不经过 OpenClaw。
               </p>
             </div>
           </div>
@@ -1613,31 +1638,6 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
           </details>
         </div>
       </section>
-
-      {viewMode === "browse" ? (
-        <section className="panel-grid">
-          {renderCharactersPanel()}
-          {renderDetailPanel()}
-        </section>
-      ) : (
-        <section className="editor-page">
-          <div className="editor-page-header">
-            {characters.length ? (
-              <button className="button-ghost" onClick={goBackToBrowse} type="button">
-                返回
-              </button>
-            ) : null}
-            <div>
-              <strong>{selected ? `正在编辑：${selected.name}` : "正在创建新角色"}</strong>
-              <div className="status">保存后可返回角色页查看详情。</div>
-            </div>
-          </div>
-          <section className="panel-grid">
-            {renderEditorPanel()}
-            {renderQuestionnairePanel()}
-          </section>
-        </section>
-      )}
 
       {showWorkspacePicker && (
         <div className="workspace-picker-overlay" onClick={() => setShowWorkspacePicker(false)}>
