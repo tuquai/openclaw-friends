@@ -13,6 +13,7 @@ import {
   QuestionnaireInput,
   SingleChoiceInput
 } from "@/lib/types";
+import type { WorkspaceSummary } from "@/lib/workspace";
 import type { TuquConfig } from "@/lib/types";
 import {
   inferMbtiFromAxes,
@@ -146,6 +147,11 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const [isCreatingTuquCharacter, startCreatingTuquCharacter] = useTransition();
   const [isStartingDiscordRuntime, startStartingDiscordRuntime] = useTransition();
   const [isStoppingDiscordRuntime, startStoppingDiscordRuntime] = useTransition();
+  const [showTuquCharacterInfo, setShowTuquCharacterInfo] = useState(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [isLoadingWorkspaces, startLoadingWorkspaces] = useTransition();
+  const [isImportingWorkspace, startImportingWorkspace] = useTransition();
   
 
   const selected = characters.find((character) => character.id === selectedId) ?? null;
@@ -430,6 +436,51 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     setStatus("已切换到新建模式。");
   }
 
+  function openWorkspacePicker() {
+    setShowWorkspacePicker(true);
+    startLoadingWorkspaces(async () => {
+      try {
+        const response = await fetch("/api/workspaces/list");
+        const json = (await response.json()) as { workspaces?: WorkspaceSummary[]; error?: string };
+        if (!response.ok || !json.workspaces) {
+          throw new Error(json.error ?? "获取 workspace 列表失败");
+        }
+        const existingIds = new Set(characters.map((c) => c.id));
+        const existingPaths = new Set(characters.map((c) => c.workspacePath).filter(Boolean));
+        const importable = json.workspaces.filter(
+          (ws) => !existingPaths.has(ws.workspacePath) && !(ws.characterId && existingIds.has(ws.characterId))
+        );
+        setAvailableWorkspaces(importable);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "获取 workspace 列表失败");
+        setAvailableWorkspaces([]);
+      }
+    });
+  }
+
+  function handleImportWorkspace(workspacePath: string) {
+    startImportingWorkspace(async () => {
+      try {
+        setStatus("正在导入 workspace...");
+        const response = await fetch("/api/workspaces/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspacePath })
+        });
+        const json = (await response.json()) as { character?: CharacterRecord; error?: string };
+        if (!response.ok || !json.character) {
+          throw new Error(json.error ?? "导入 workspace 失败");
+        }
+        mergeCharacterRecord(json.character);
+        setShowWorkspacePicker(false);
+        setViewMode("edit");
+        setStatus(`已导入 workspace 角色「${json.character.name}」，可以编辑并补全缺失的配置。`);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "导入 workspace 失败");
+      }
+    });
+  }
+
   function startEditingCharacter(characterId: string) {
     setSelectedId(characterId);
     setViewMode("edit");
@@ -658,7 +709,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
     startSavingTuqu(async () => {
       try {
-        setTuquStatus("正在保存 TUQU 配置...");
+        setTuquStatus("正在保存 TuQu AI 配置...");
         const response = await fetch("/api/tuqu/config", {
           method: "POST",
           headers: {
@@ -673,18 +724,18 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
         });
         const json = (await response.json()) as { character?: CharacterRecord; error?: string };
         if (!response.ok || !json.character) {
-          throw new Error(json.error ?? "保存 TUQU 配置失败");
+          throw new Error(json.error ?? "保存 TuQu AI 配置失败");
         }
 
         mergeCharacterRecord(json.character);
         setTuquConfigDraft(json.character.tuquConfig ?? defaultTuquConfig());
         setTuquStatus(
           json.character.workspacePath
-            ? "TUQU 配置已保存，并同步写入当前 workspace。"
-            : "TUQU 配置已保存。创建 workspace 时会自动写入当前角色。"
+            ? "TuQu AI 配置已保存，并同步写入当前 workspace。"
+            : "TuQu AI 配置已保存。创建 workspace 时会自动写入当前角色。"
         );
       } catch (error) {
-        setTuquStatus(error instanceof Error ? error.message : "保存 TUQU 配置失败");
+        setTuquStatus(error instanceof Error ? error.message : "保存 TuQu AI 配置失败");
       }
     });
   }
@@ -697,7 +748,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
     startCreatingTuquCharacter(async () => {
       try {
-        setTuquStatus("正在用当前角色头像创建 TUQU character...");
+        setTuquStatus("正在用当前角色头像创建 TuQu AI Character...");
         const response = await fetch("/api/tuqu/character", {
           method: "POST",
           headers: {
@@ -713,14 +764,14 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
           error?: string;
         };
         if (!response.ok || !json.character || !json.tuquCharacterId) {
-          throw new Error(json.error ?? "创建 TUQU character 失败");
+          throw new Error(json.error ?? "创建 TuQu AI Character 失败");
         }
 
         mergeCharacterRecord(json.character);
         setTuquConfigDraft(json.character.tuquConfig ?? defaultTuquConfig());
-        setTuquStatus(`TUQU character 已创建：${json.tuquCharacterId}`);
+        setTuquStatus(`TuQu AI Character 已创建：${json.tuquCharacterId}`);
       } catch (error) {
-        setTuquStatus(error instanceof Error ? error.message : "创建 TUQU character 失败");
+        setTuquStatus(error instanceof Error ? error.message : "创建 TuQu AI Character 失败");
       }
     });
   }
@@ -932,9 +983,14 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
               <h2>现有角色</h2>
               <p>先在这里选择角色；需要修改时再进入独立编辑页。</p>
             </div>
-            <button className="button-primary" onClick={startNewCharacter} type="button">
-              新建角色
-            </button>
+            <div className="panel-title-actions">
+              <button className="button-primary" onClick={startNewCharacter} type="button">
+                新建角色
+              </button>
+              <button className="button-secondary" onClick={openWorkspacePicker} type="button">
+                同步现有 Workspace
+              </button>
+            </div>
           </div>
 
           <div className="character-list">
@@ -1134,7 +1190,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             </span>
           </div>
 
-          <div>
+          <div className="stack-sm">
             <h4>Discord 绑定</h4>
             <div className="form-grid">
               <div className="field">
@@ -1195,17 +1251,19 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             </div>
           </div>
 
-          <div>
-            <h4>TUQU 配置</h4>
+          <div className="stack-sm">
+            <h4>TuQu AI 配置</h4>
             <div className="form-grid">
               <div className="field-full">
-                <label htmlFor="tuqu-registration-url">注册地址</label>
-                <input
-                  id="tuqu-registration-url"
-                  onChange={(event) => handleTuquConfigChange("registrationUrl", event.target.value)}
-                  placeholder="TUQU 注册地址"
-                  value={tuquConfigDraft.registrationUrl}
-                />
+                <label>注册/充值</label>
+                <a
+                  className="tuqu-registration-link"
+                  href={tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  {tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+                </a>
               </div>
 
               <div className="field-full">
@@ -1213,35 +1271,63 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                 <input
                   id="tuqu-service-key"
                   onChange={(event) => handleTuquConfigChange("serviceKey", event.target.value)}
-                  placeholder="明文保存的 TUQU Service Key"
+                  placeholder="明文保存的 TuQu AI Service Key"
                   value={tuquConfigDraft.serviceKey}
                 />
               </div>
 
               <div className="field-full">
-                <label htmlFor="tuqu-character-id">TUQU Character ID</label>
-                <input
-                  id="tuqu-character-id"
-                  onChange={(event) => handleTuquConfigChange("characterId", event.target.value)}
-                  placeholder="可选；角色首次在 TUQU 创建完成后填回这里"
-                  value={tuquConfigDraft.characterId ?? ""}
-                />
+                <label>TuQu AI Character ID</label>
+                <div className="tuqu-character-status-row">
+                  {tuquConfigDraft.characterId ? (
+                    <span className="pill" style={{ fontSize: "0.92rem" }}>
+                      已注册：{tuquConfigDraft.characterId}
+                    </span>
+                  ) : (
+                    <span className="pill warm" style={{ fontSize: "0.92rem" }}>尚未注册</span>
+                  )}
+                  <div className="tuqu-info-anchor">
+                    <button
+                      className="button-ghost tuqu-info-button"
+                      onClick={() => setShowTuquCharacterInfo((prev) => !prev)}
+                      type="button"
+                    >
+                      ?
+                    </button>
+                    {showTuquCharacterInfo && (
+                      <div className="tuqu-info-popover">
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <strong style={{ fontSize: "0.92rem" }}>什么是 TuQu Character？</strong>
+                          <button
+                            className="button-ghost"
+                            onClick={() => setShowTuquCharacterInfo(false)}
+                            style={{ padding: "4px 10px", fontSize: "0.82rem", borderRadius: "8px" }}
+                            type="button"
+                          >
+                            关闭
+                          </button>
+                        </div>
+                        <p style={{ margin: "8px 0 0", lineHeight: 1.6, fontSize: "0.9rem", color: "var(--muted)" }}>
+                          TuQu Character 是用指定角色的照片及特征介绍创建的一个参考用人物。创建后可以无限为该角色生成照片，而无需提供除了该角色 ID 之外的参数。
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
             <div className="actions">
               <button className="button-secondary" disabled={isSavingTuqu} onClick={handleSaveTuquConfig} type="button">
-                {isSavingTuqu ? "保存中..." : "保存 TUQU 配置"}
+                {isSavingTuqu ? "保存中..." : "保存 TuQu AI 配置"}
               </button>
               <button className="button-ghost" disabled={isCreatingTuquCharacter} onClick={handleCreateTuquCharacter} type="button">
-                {isCreatingTuquCharacter ? "创建中..." : "创建 TUQU Character"}
+                {isCreatingTuquCharacter ? "创建中..." : "创建 TuQu AI Character"}
               </button>
             </div>
             <div className="workspace-feedback">
               {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
               <br />
-              {tuquConfigDraft.characterId ? `当前 TUQU Character ID：${tuquConfigDraft.characterId}` : "当前还没有 TUQU Character ID。"}
-              <br />
-              {tuquStatus || "这里会明文保存 TUQU 注册地址和 Service Key，并同步到 workspace。"}
+              {tuquStatus || "这里会明文保存 TuQu AI Service Key，并同步到 workspace。"}
             </div>
           </div>
         </div>
@@ -1451,6 +1537,17 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
               <span className="badge">MBTI 自动推测</span>
               <span className="badge">多选关系偏好</span>
               <span className="badge">好感值路线</span>
+              <a
+                className="badge discord-badge"
+                href="https://discord.gg/Y5EExWtP"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <svg width="20" height="16" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.3 37.3 0 0025.4.3a.2.2 0 00-.2-.1 58.4 58.4 0 00-14.7 4.6.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.2a58.9 58.9 0 0017.7 9 .2.2 0 00.3-.1 42.1 42.1 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.7.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.7 58.7 0 0070.7 45.7v-.2c1.4-15.2-2.4-28.4-10-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.3 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1z" fill="currentColor"/>
+                </svg>
+                官方 Discord
+              </a>
             </div>
           </div>
           <div className="hint-box">
@@ -1533,6 +1630,61 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             {renderQuestionnairePanel()}
           </section>
         </section>
+      )}
+
+      {showWorkspacePicker && (
+        <div className="workspace-picker-overlay" onClick={() => setShowWorkspacePicker(false)}>
+          <div className="workspace-picker-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="workspace-picker-header">
+              <h3>同步现有 Workspace</h3>
+              <button
+                className="button-ghost"
+                onClick={() => setShowWorkspacePicker(false)}
+                type="button"
+              >
+                关闭
+              </button>
+            </div>
+            <p className="workspace-picker-desc">
+              选择一个已有的 workspace 导入为设计器角色。导入后可以编辑并补全缺失的配置，然后同步回 workspace。
+            </p>
+            {isLoadingWorkspaces ? (
+              <div className="workspace-picker-loading">正在扫描 workspace 目录...</div>
+            ) : availableWorkspaces.length === 0 ? (
+              <div className="workspace-picker-empty">
+                没有找到可导入的 workspace。已被设计器管理的 workspace 不会重复显示。
+              </div>
+            ) : (
+              <div className="workspace-picker-list">
+                {availableWorkspaces.map((ws) => (
+                  <div className="workspace-picker-item" key={ws.workspacePath}>
+                    <div className="workspace-picker-item-info">
+                      <strong>{ws.characterName || ws.dirName}</strong>
+                      <span className="workspace-picker-item-path">{ws.dirName}</span>
+                      <div className="meta-line">
+                        {ws.hasIdentityMd && <span className="pill">IDENTITY.md</span>}
+                        {ws.hasSoulMd && <span className="pill">SOUL.md</span>}
+                        {ws.hasUserMd && <span className="pill">USER.md</span>}
+                        {ws.hasMemoryMd && <span className="pill">MEMORY.md</span>}
+                        {ws.hasDiscordLink && <span className="pill warm">Discord</span>}
+                        {ws.hasTuquConfig && <span className="pill warm">TuQu</span>}
+                        {ws.hasCharacterRecord && <span className="pill">完整记录</span>}
+                      </div>
+                    </div>
+                    <button
+                      className="button-primary"
+                      disabled={isImportingWorkspace}
+                      onClick={() => handleImportWorkspace(ws.workspacePath)}
+                      type="button"
+                    >
+                      {isImportingWorkspace ? "导入中..." : "导入"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );

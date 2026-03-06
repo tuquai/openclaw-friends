@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
-import { CharacterRecord } from "@/lib/types";
+import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 
 function getWorkspaceRoot() {
   return process.env.OPENCLAW_WORKSPACE_ROOT ?? path.join(os.homedir(), ".openclaw");
@@ -938,6 +938,27 @@ async function writeWorkspaceFiles(character: CharacterRecord, workspacePath: st
   await fs.writeFile(path.join(workspacePath, "MEMORY.md"), character.blueprintPackage?.files.memoryMd ?? "", "utf8");
 }
 
+type CatalogItem = { id: string; name: string; nameEn?: string; description?: string; category?: string; defaultModel?: string; tags?: string[] };
+type CatalogCache = { fetchedAt: string; templates: CatalogItem[]; styles: CatalogItem[]; usage?: unknown };
+
+async function fetchTuquCatalog(): Promise<CatalogCache | null> {
+  const baseUrl = process.env.TUQU_API_BASE ?? "https://photo.tuqu.ai";
+  try {
+    const res = await fetch(`${baseUrl}/api/catalog`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { success?: boolean; data?: { templates?: CatalogItem[]; styles?: CatalogItem[]; usage?: unknown } };
+    if (!json.success || !json.data) return null;
+    return {
+      fetchedAt: new Date().toISOString(),
+      templates: (json.data.templates ?? []).map(t => ({ id: t.id, name: t.name, nameEn: t.nameEn, description: t.description, category: t.category, defaultModel: t.defaultModel, tags: t.tags })),
+      styles: (json.data.styles ?? []).map(s => ({ id: s.id, name: s.name, nameEn: s.nameEn, description: s.description, category: s.category, defaultModel: s.defaultModel })),
+      usage: json.data.usage
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function installTuquCatalogSkill(character: CharacterRecord, workspacePath: string) {
   const targetRoot = path.join(workspacePath, "tuqu-catalog");
   const logsDir = path.join(workspacePath, "tuqu-logs");
@@ -948,6 +969,11 @@ async function installTuquCatalogSkill(character: CharacterRecord, workspacePath
   await fs.writeFile(path.join(targetRoot, "generate-freestyle.sh"), buildGenerateFreestyleScript(), "utf8");
   await fs.writeFile(path.join(targetRoot, "generate-from-catalog.sh"), buildGenerateFromCatalogScript(), "utf8");
   await fs.writeFile(path.join(targetRoot, "log-tuqu-call.sh"), buildLogTuquCallScript(), "utf8");
+
+  const catalog = await fetchTuquCatalog();
+  if (catalog) {
+    await fs.writeFile(path.join(targetRoot, "catalog-cache.json"), JSON.stringify(catalog, null, 2), "utf8");
+  }
 }
 
 async function installCharacterSelfieFallback(character: CharacterRecord, workspacePath: string) {
@@ -1098,4 +1124,305 @@ export async function syncWorkspaceFiles(character: CharacterRecord) {
   }
 
   await writeWorkspaceFiles(character, character.workspacePath);
+}
+
+export type WorkspaceSummary = {
+  workspacePath: string;
+  dirName: string;
+  characterName: string | null;
+  characterId: string | null;
+  hasIdentityMd: boolean;
+  hasSoulMd: boolean;
+  hasUserMd: boolean;
+  hasMemoryMd: boolean;
+  hasDiscordLink: boolean;
+  hasTuquConfig: boolean;
+  hasCharacterRecord: boolean;
+};
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function listAvailableWorkspaces(): Promise<WorkspaceSummary[]> {
+  const workspaceRoot = getWorkspaceRoot();
+  const results: WorkspaceSummary[] = [];
+
+  let entries: import("fs").Dirent[];
+  try {
+    entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("workspace-"))
+      .map(async (entry) => {
+        const workspacePath = path.join(workspaceRoot, entry.name);
+        const openclawDir = path.join(workspacePath, ".openclaw");
+
+        let characterName: string | null = null;
+        let characterId: string | null = null;
+
+        try {
+          const stateRaw = JSON.parse(
+            await fs.readFile(path.join(openclawDir, "workspace-state.json"), "utf8")
+          ) as { characterName?: string; characterId?: string };
+          characterName = stateRaw.characterName ?? null;
+          characterId = stateRaw.characterId ?? null;
+        } catch {
+          // try character-record.json instead
+        }
+
+        if (!characterName) {
+          try {
+            const recordRaw = JSON.parse(
+              await fs.readFile(path.join(openclawDir, "character-record.json"), "utf8")
+            ) as { name?: string; id?: string };
+            characterName = recordRaw.name ?? null;
+            characterId = characterId ?? recordRaw.id ?? null;
+          } catch {
+            // no record either, use dir name
+          }
+        }
+
+        const [hasIdentityMd, hasSoulMd, hasUserMd, hasMemoryMd, hasDiscordLink, hasTuquConfig, hasCharacterRecord] =
+          await Promise.all([
+            fileExists(path.join(workspacePath, "IDENTITY.md")),
+            fileExists(path.join(workspacePath, "SOUL.md")),
+            fileExists(path.join(workspacePath, "USER.md")),
+            fileExists(path.join(workspacePath, "MEMORY.md")),
+            fileExists(path.join(openclawDir, "discord-link.json")),
+            fileExists(path.join(openclawDir, "tuqu-config.json")),
+            fileExists(path.join(openclawDir, "character-record.json"))
+          ]);
+
+        results.push({
+          workspacePath,
+          dirName: entry.name,
+          characterName,
+          characterId,
+          hasIdentityMd,
+          hasSoulMd,
+          hasUserMd,
+          hasMemoryMd,
+          hasDiscordLink,
+          hasTuquConfig,
+          hasCharacterRecord
+        });
+      })
+  );
+
+  results.sort((a, b) => a.dirName.localeCompare(b.dirName));
+  return results;
+}
+
+export async function importWorkspaceAsCharacter(workspacePath: string): Promise<CharacterRecord> {
+  const openclawDir = path.join(workspacePath, ".openclaw");
+
+  let base: Partial<CharacterRecord> = {};
+  try {
+    const raw = JSON.parse(
+      await fs.readFile(path.join(openclawDir, "character-record.json"), "utf8")
+    );
+    base = raw as Partial<CharacterRecord>;
+  } catch {
+    // no existing record — build from workspace files
+  }
+
+  if (!base.name) {
+    try {
+      const stateRaw = JSON.parse(
+        await fs.readFile(path.join(openclawDir, "workspace-state.json"), "utf8")
+      ) as { characterName?: string; characterId?: string };
+      base.name = stateRaw.characterName ?? undefined;
+      base.id = base.id ?? stateRaw.characterId ?? undefined;
+    } catch {
+      // no state file
+    }
+  }
+
+  const dirBasename = path.basename(workspacePath);
+  if (!base.name) {
+    const slug = dirBasename.replace(/^workspace-/, "").replace(/-[a-f0-9]{8}$/, "");
+    base.name = slug || "未命名角色";
+  }
+
+  const [identityMd, soulMd, userMd, memoryMd] = await Promise.all([
+    fs.readFile(path.join(workspacePath, "IDENTITY.md"), "utf8").catch(() => ""),
+    fs.readFile(path.join(workspacePath, "SOUL.md"), "utf8").catch(() => ""),
+    fs.readFile(path.join(workspacePath, "USER.md"), "utf8").catch(() => ""),
+    fs.readFile(path.join(workspacePath, "MEMORY.md"), "utf8").catch(() => "")
+  ]);
+
+  const hasFiles = Boolean(identityMd || soulMd || userMd || memoryMd);
+
+  if (hasFiles && !base.blueprintPackage) {
+    base.blueprintPackage = {
+      summary: {
+        oneLiner: base.concept || "",
+        archetype: "",
+        confidenceNotes: []
+      },
+      character: {
+        name: base.name ?? "未命名角色",
+        age: base.age ?? "",
+        gender: base.gender ?? "",
+        occupation: base.occupation ?? "",
+        heritage: base.heritage ?? "",
+        worldSetting: base.worldSetting ?? "当代地球",
+        concept: base.concept ?? "",
+        mbti: base.mbti ?? "",
+        coreTraits: [],
+        speakingStyle: [],
+        emotionalHabits: [],
+        topicPreferences: [],
+        hardBoundaries: []
+      },
+      relationship: {
+        dynamic: "",
+        backstory: "",
+        affectionBaseline: "",
+        affectionGrowthPath: [],
+        chemistry: [],
+        friction: [],
+        userAddressingStyle: ""
+      },
+      followups: {
+        missingButUseful: [],
+        optionalDeepeningQuestions: []
+      },
+      files: { identityMd, soulMd, userMd, memoryMd }
+    };
+  } else if (hasFiles && base.blueprintPackage) {
+    base.blueprintPackage = {
+      ...base.blueprintPackage,
+      files: { identityMd, soulMd, userMd, memoryMd }
+    };
+  }
+
+  let discordLink: DiscordLink | undefined;
+  try {
+    const raw = JSON.parse(
+      await fs.readFile(path.join(openclawDir, "discord-link.json"), "utf8")
+    ) as Partial<DiscordLink>;
+    if (raw.channelId || raw.userId) {
+      discordLink = {
+        accountId: raw.accountId,
+        guildId: raw.guildId,
+        channelId: raw.channelId ?? "",
+        botId: raw.botId,
+        userId: raw.userId ?? "",
+        linkedAt: raw.linkedAt ?? new Date().toISOString(),
+        workspacePath
+      };
+    }
+  } catch {
+    // no discord link
+  }
+
+  let tuquConfig: TuquConfig | undefined;
+  try {
+    const raw = JSON.parse(
+      await fs.readFile(path.join(openclawDir, "tuqu-config.json"), "utf8")
+    ) as Partial<TuquConfig> & { tuquCharacterId?: string };
+    tuquConfig = {
+      registrationUrl: raw.registrationUrl ?? "https://billing.tuqu.ai/dream-weaver/login",
+      serviceKey: raw.serviceKey ?? "",
+      characterId: raw.characterId ?? raw.tuquCharacterId,
+      updatedAt: raw.updatedAt ?? new Date().toISOString()
+    };
+  } catch {
+    // no tuqu config
+  }
+
+  if (!tuquConfig) {
+    try {
+      const key = (await fs.readFile(path.join(workspacePath, "tuqu_service_key.txt"), "utf8")).trim();
+      if (key) {
+        tuquConfig = {
+          registrationUrl: "https://billing.tuqu.ai/dream-weaver/login",
+          serviceKey: key,
+          updatedAt: new Date().toISOString()
+        };
+      }
+    } catch {
+      // no service key file
+    }
+  }
+
+  if (tuquConfig) {
+    try {
+      const raw = JSON.parse(
+        await fs.readFile(path.join(workspacePath, "tuqu_character.json"), "utf8")
+      ) as { characterId?: string };
+      if (raw.characterId) {
+        tuquConfig.characterId = tuquConfig.characterId ?? raw.characterId;
+      }
+    } catch {
+      // no tuqu character file
+    }
+  }
+
+  let photos: string[] = base.photos ?? [];
+  if (!photos.length) {
+    const profileCandidates = ["profile.jpg", "profile.png", "profile.jpeg", "profile.webp"];
+    for (const candidate of profileCandidates) {
+      if (await fileExists(path.join(workspacePath, candidate))) {
+        photos = [`/uploads/${path.basename(workspacePath)}-${candidate}`];
+        try {
+          const dest = path.join(process.cwd(), "public", "uploads", `${path.basename(workspacePath)}-${candidate}`);
+          await fs.mkdir(path.dirname(dest), { recursive: true });
+          await fs.copyFile(path.join(workspacePath, candidate), dest);
+        } catch {
+          photos = [];
+        }
+        break;
+      }
+    }
+  }
+
+  const now = new Date().toISOString();
+  const record: CharacterRecord = {
+    id: base.id ?? crypto.randomUUID(),
+    name: base.name ?? "未命名角色",
+    age: base.age ?? "",
+    gender: base.gender ?? "",
+    occupation: base.occupation ?? "",
+    heritage: base.heritage ?? "",
+    worldSetting: base.worldSetting ?? "当代地球",
+    concept: base.concept ?? "",
+    mbti: base.mbti ?? "",
+    personality: base.personality ?? {
+      socialEnergy: "",
+      informationFocus: "",
+      decisionStyle: "",
+      lifestylePace: "",
+      otherNotes: ""
+    },
+    photos,
+    createdAt: base.createdAt ?? now,
+    updatedAt: now,
+    questionnaire: base.questionnaire,
+    blueprintPackage: base.blueprintPackage,
+    discordLink: discordLink ?? base.discordLink,
+    tuquConfig: tuquConfig ?? base.tuquConfig,
+    workspacePath,
+    preset: base.preset
+  };
+
+  await fs.mkdir(openclawDir, { recursive: true });
+  await fs.writeFile(
+    path.join(openclawDir, "character-record.json"),
+    JSON.stringify(record, null, 2),
+    "utf8"
+  );
+
+  return record;
 }
