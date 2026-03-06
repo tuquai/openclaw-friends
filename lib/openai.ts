@@ -1,5 +1,6 @@
 import { BlueprintPackage, DraftCharacterInput, QuestionnaireInput } from "@/lib/types";
 import { MBTI_PRESETS } from "@/lib/mbti";
+import type { RechargePlan } from "@/lib/tuqu";
 
 const schema = {
   name: "blueprint_package",
@@ -364,7 +365,8 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                 "If TUQU Service Key exists but TUQU Character ID is missing for identity-preserving photos, tell the user you need to create your own TUQU character first from your workspace profile image and your own role data.",
                 "Do not ask the user for their own face photo unless they explicitly say they want to generate images using their personal face.",
                 "When responding to photo or selfie requests, do not present multiple options, menus, or brainstorming lists unless the user explicitly asks for choices.",
-                "Instead, infer the single most fitting photo direction from your own character background and speak decisively."
+                "Instead, infer the single most fitting photo direction from your own character background and speak decisively.",
+                "If the user asks about 充值, 余额, 买点数, top up, recharge, or how to pay for image generation: tell them you can help and ask whether they want WeChat or credit card. Keep the tone casual and helpful."
               ].join(" ")
             }
           ]
@@ -583,4 +585,116 @@ export async function generateInCharacterError(payload: InCharacterErrorPayload)
 
   const json = (await response.json()) as Record<string, unknown>;
   return extractText(json).trim();
+}
+
+// ── Recharge Decision (structured output) ───────────────────────────
+
+const rechargeDecisionSchema = {
+  name: "recharge_decision",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      chatReply: { type: "string", description: "In-character reply about recharging (Chinese, casual, no markdown)" },
+      action: {
+        type: "string",
+        enum: ["list_plans", "wechat_payment", "stripe_payment", "none"],
+        description: "list_plans = present plans; wechat_payment / stripe_payment = create payment for chosen plan; none = no action needed"
+      },
+      planId: { type: "string", description: "Plan ID when action is wechat_payment or stripe_payment; empty string otherwise" }
+    },
+    required: ["chatReply", "action", "planId"]
+  }
+};
+
+export type RechargeDecisionResult = {
+  chatReply: string;
+  action: "list_plans" | "wechat_payment" | "stripe_payment" | "none";
+  planId: string;
+};
+
+type RechargeDecisionPayload = {
+  characterName: string;
+  identityMd: string;
+  soulMd: string;
+  plans: RechargePlan[];
+  message: string;
+  username: string;
+};
+
+export async function generateRechargeDecision(payload: RechargeDecisionPayload): Promise<RechargeDecisionResult> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY");
+  }
+
+  const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
+  const plansText = payload.plans
+    .map((p) => `- id="${p.id}" ${p.name}: ${p.tokenGrant}点${p.bonusToken ? `+${p.bonusToken}点` : ""}, ¥${p.priceAmount / 100}`)
+    .join("\n");
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                `You are ${payload.characterName}. Stay in character. Use Chinese.`,
+                "The user wants to recharge image generation tokens. Here are the available plans:",
+                plansText,
+                "",
+                "Based on the user's message, decide:",
+                '- "list_plans": They haven\'t picked a plan yet, or just asked about options. Present the plans readably in chatReply.',
+                '- "wechat_payment": They want to pay via WeChat (微信). Set planId to the chosen plan\'s id.',
+                '- "stripe_payment": They want to pay via credit card / Stripe. Set planId to the chosen plan\'s id.',
+                '- "none": Not actually a recharge request.',
+                "",
+                "If creating a payment, tell the user the QR code or link is on the way.",
+                "If the user mentions an amount or number of tokens, match it to the closest plan.",
+                "chatReply should be concise, casual, in-character. No markdown."
+              ].join("\n")
+            }
+          ]
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: JSON.stringify({
+                identityMd: payload.identityMd,
+                soulMd: payload.soulMd,
+                username: payload.username,
+                message: payload.message
+              })
+            }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          ...rechargeDecisionSchema
+        }
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI request failed (${response.status}): ${detail}`);
+  }
+
+  const json = (await response.json()) as Record<string, unknown>;
+  return JSON.parse(extractText(json)) as RechargeDecisionResult;
 }

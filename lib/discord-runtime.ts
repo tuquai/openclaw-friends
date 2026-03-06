@@ -4,13 +4,21 @@ import path from "path";
 import { Client, Events, GatewayIntentBits, Message, Partials } from "discord.js";
 import { listCharacters } from "@/lib/data";
 import { listDiscordRuntimeAccounts, readDiscordRuntimeAccount } from "@/lib/discord-config";
-import { generateDiscordReply, generateInCharacterError, generatePhotoScene } from "@/lib/openai";
-import { generateCharacterImage, generateFreestyleImage, TuquApiError } from "@/lib/tuqu";
+import { generateDiscordReply, generateInCharacterError, generatePhotoScene, generateRechargeDecision } from "@/lib/openai";
+import { generateCharacterImage, generateFreestyleImage, TuquApiError, listRechargePlans, createWechatPayment, createStripePayment } from "@/lib/tuqu";
 import { CharacterRecord, DiscordRuntimeAccountStatus, DiscordRuntimeStatus } from "@/lib/types";
+
+type ReconnectState = {
+  consecutiveErrors: number;
+  lastErrorAt: number;
+  backoffMs: number;
+  timer: ReturnType<typeof setTimeout> | null;
+};
 
 type RuntimeState = {
   clients: Map<string, Client>;
   statuses: Map<string, DiscordRuntimeAccountStatus>;
+  reconnects: Map<string, ReconnectState>;
 };
 
 const globalRuntime = globalThis as typeof globalThis & {
@@ -19,15 +27,67 @@ const globalRuntime = globalThis as typeof globalThis & {
 const runtimeLockDir = path.join(process.cwd(), "data", "discord-runtime-locks");
 const openclawConfigPath = path.join(process.env.OPENCLAW_HOME ?? path.join(os.homedir(), ".openclaw"), "openclaw.json");
 
+const INITIAL_BACKOFF_MS = 5_000;
+const MAX_BACKOFF_MS = 120_000;
+const RAPID_ERROR_WINDOW_MS = 30_000;
+const MAX_RAPID_ERRORS = 5;
+
 function getRuntimeState() {
   if (!globalRuntime.__openclawDiscordRuntime) {
     globalRuntime.__openclawDiscordRuntime = {
       clients: new Map(),
-      statuses: new Map()
+      statuses: new Map(),
+      reconnects: new Map()
     };
   }
 
   return globalRuntime.__openclawDiscordRuntime;
+}
+
+function getReconnectState(accountId: string): ReconnectState {
+  const runtime = getRuntimeState();
+  let state = runtime.reconnects.get(accountId);
+  if (!state) {
+    state = { consecutiveErrors: 0, lastErrorAt: 0, backoffMs: INITIAL_BACKOFF_MS, timer: null };
+    runtime.reconnects.set(accountId, state);
+  }
+  return state;
+}
+
+function resetReconnectState(accountId: string) {
+  const runtime = getRuntimeState();
+  const state = runtime.reconnects.get(accountId);
+  if (state?.timer) {
+    clearTimeout(state.timer);
+  }
+  runtime.reconnects.set(accountId, {
+    consecutiveErrors: 0,
+    lastErrorAt: 0,
+    backoffMs: INITIAL_BACKOFF_MS,
+    timer: null
+  });
+}
+
+function scheduleReconnect(accountId: string) {
+  const rs = getReconnectState(accountId);
+  if (rs.timer) {
+    return;
+  }
+
+  const delay = rs.backoffMs;
+  console.log(`[discord] scheduling reconnect for ${accountId} in ${delay}ms`);
+
+  rs.timer = setTimeout(async () => {
+    rs.timer = null;
+    try {
+      console.log(`[discord] attempting fresh reconnect for ${accountId}`);
+      await startDiscordAccount(accountId);
+    } catch (error) {
+      console.error(`[discord] reconnect for ${accountId} failed:`, error);
+    }
+  }, delay);
+
+  rs.backoffMs = Math.min(rs.backoffMs * 2, MAX_BACKOFF_MS);
 }
 
 function runtimeLockPath(accountId: string) {
@@ -244,11 +304,16 @@ type RoleContext = {
   recentMemory?: string;
 };
 
-function describeTuquError(error: unknown): string {
+function describeTuquError(error: unknown, character?: CharacterRecord): string {
   if (error instanceof TuquApiError) {
     if (error.code === "INSUFFICIENT_BALANCE") {
       const balanceHint = typeof error.remainingBalance === "number" ? `（当前余额: ${error.remainingBalance}）` : "";
-      return `图片生成服务余额不足${balanceHint}，需要用户去充值才能继续生成图片。提醒用户及时充值，语气轻松友好，不要让用户觉得尴尬。`;
+      return [
+        `图片生成服务余额不足${balanceHint}，需要帮用户充值才能继续生成图片。`,
+        "告诉用户你可以帮忙查看充值方案并直接生成付款二维码或付款链接。",
+        "问用户要用微信扫码还是信用卡（Stripe），然后你来调用充值API帮他们搞定。",
+        "语气轻松友好，不要让用户觉得尴尬。不要只甩一个登录链接让用户自己去操作。"
+      ].join(" ");
     }
     if (error.code === "GENERATION_FAILED") {
       return "图片生成过程出了点意外，可能是暂时性故障。让用户稍后再试一次。";
@@ -264,7 +329,7 @@ async function replyWithInCharacterError(
   context: RoleContext,
   error: unknown
 ) {
-  const situation = describeTuquError(error);
+  const situation = describeTuquError(error, character);
   try {
     const reply = await generateInCharacterError({
       characterName: character.name,
@@ -336,6 +401,88 @@ async function handlePhotoRequest(
   await appendConversationMemory(character, message.author.username, userText, `${scene.chatReply} [\u56fe\u7247]`);
 }
 
+function isRechargeRequest(message: string) {
+  return /充值|余额|买点|recharge|top.?up|付[费款]|续费/u.test(message);
+}
+
+function decodeQrCodeBuffer(dataUri: string): Buffer {
+  const raw = dataUri.replace(/^data:image\/\w+;base64,/, "");
+  return Buffer.from(raw, "base64");
+}
+
+async function handleRechargeRequest(
+  message: Message,
+  character: CharacterRecord,
+  context: RoleContext,
+  userText: string
+) {
+  const serviceKey = character.tuquConfig!.serviceKey;
+
+  let plans;
+  try {
+    plans = await listRechargePlans(serviceKey);
+  } catch (err) {
+    console.error("[recharge] failed to list plans:", err);
+    await message.reply("充值方案没加载出来，稍后再试试～");
+    return;
+  }
+
+  const decision = await generateRechargeDecision({
+    characterName: character.name,
+    identityMd: context.identityMd,
+    soulMd: context.soulMd,
+    plans,
+    message: userText,
+    username: message.author.username
+  });
+
+  if (decision.action === "wechat_payment" && decision.planId) {
+    try {
+      const payment = await createWechatPayment(serviceKey, decision.planId);
+      if (payment.qrcodeImg) {
+        const buffer = decodeQrCodeBuffer(payment.qrcodeImg);
+        await message.reply({
+          content: decision.chatReply,
+          files: [{ attachment: buffer, name: "wechat-pay.png" }]
+        });
+      } else if (payment.payUrl) {
+        await message.reply(`${decision.chatReply}\n${payment.payUrl}`);
+      } else {
+        await message.reply(decision.chatReply);
+      }
+    } catch (err) {
+      console.error("[recharge] wechat payment failed:", err);
+      await message.reply(`${decision.chatReply}\n\n（支付生成失败了，稍后再试）`);
+    }
+    return;
+  }
+
+  if (decision.action === "stripe_payment" && decision.planId) {
+    try {
+      const payment = await createStripePayment(serviceKey, decision.planId);
+      const replyText = payment.checkoutUrl
+        ? `${decision.chatReply}\n${payment.checkoutUrl}`
+        : decision.chatReply;
+      if (payment.qrcodeImg) {
+        const buffer = decodeQrCodeBuffer(payment.qrcodeImg);
+        await message.reply({
+          content: replyText,
+          files: [{ attachment: buffer, name: "stripe-pay.png" }]
+        });
+      } else {
+        await message.reply(replyText);
+      }
+    } catch (err) {
+      console.error("[recharge] stripe payment failed:", err);
+      await message.reply(`${decision.chatReply}\n\n（支付生成失败了，稍后再试）`);
+    }
+    return;
+  }
+
+  await message.reply(decision.chatReply);
+  await appendConversationMemory(character, message.author.username, userText, decision.chatReply);
+}
+
 const BOT_REPLY_COOLDOWN_MS = 3000;
 const lastBotReplyAt = new Map<string, number>();
 
@@ -400,6 +547,12 @@ async function handleMessage(message: Message) {
 
     if (isPhoto && tuquReady) {
       await handlePhotoRequest(message, character, context, trimmed);
+      return;
+    }
+
+    const hasServiceKey = Boolean(character.tuquConfig?.serviceKey?.trim());
+    if (!message.author.bot && hasServiceKey && isRechargeRequest(trimmed)) {
+      await handleRechargeRequest(message, character, context, trimmed);
       return;
     }
 
@@ -489,6 +642,7 @@ async function startDiscordAccount(accountId: string) {
   runtime.statuses.set(accountId, baseStatus);
 
   client.once(Events.ClientReady, (readyClient) => {
+    resetReconnectState(accountId);
     runtime.statuses.set(accountId, {
       accountId,
       running: true,
@@ -505,6 +659,16 @@ async function startDiscordAccount(accountId: string) {
   });
 
   client.on(Events.Error, (error) => {
+    console.error(`[discord] client error for ${accountId}:`, error.message);
+    const rs = getReconnectState(accountId);
+    const now = Date.now();
+    if (now - rs.lastErrorAt < RAPID_ERROR_WINDOW_MS) {
+      rs.consecutiveErrors++;
+    } else {
+      rs.consecutiveErrors = 1;
+    }
+    rs.lastErrorAt = now;
+
     runtime.statuses.set(accountId, {
       accountId,
       running: false,
@@ -512,6 +676,36 @@ async function startDiscordAccount(accountId: string) {
       characterName: config.characterName,
       error: error.message
     });
+
+    if (rs.consecutiveErrors >= MAX_RAPID_ERRORS) {
+      console.log(`[discord] ${accountId}: ${rs.consecutiveErrors} rapid errors, destroying client for clean restart`);
+      rs.consecutiveErrors = 0;
+      client.destroy().then(() => {
+        runtime.clients.delete(accountId);
+        scheduleReconnect(accountId);
+      });
+    }
+  });
+
+  client.on(Events.ShardDisconnect, (event, shardId) => {
+    console.log(`[discord] shard ${shardId} disconnected for ${accountId} (code ${event.code})`);
+    if (event.code === 1006) {
+      const rs = getReconnectState(accountId);
+      rs.consecutiveErrors++;
+      rs.lastErrorAt = Date.now();
+      if (rs.consecutiveErrors >= MAX_RAPID_ERRORS && !rs.timer) {
+        console.log(`[discord] ${accountId}: abnormal closures detected, destroying for clean restart`);
+        rs.consecutiveErrors = 0;
+        client.destroy().then(() => {
+          runtime.clients.delete(accountId);
+          scheduleReconnect(accountId);
+        });
+      }
+    }
+  });
+
+  client.on(Events.ShardReady, (_shardId) => {
+    resetReconnectState(accountId);
   });
 
   try {
@@ -554,6 +748,7 @@ export async function stopDiscordRuntime(accountId?: string) {
   const entries = accountId ? [[accountId, runtime.clients.get(accountId) ?? null] as const] : Array.from(runtime.clients.entries());
 
   for (const [key, client] of entries) {
+    resetReconnectState(key);
     if (client) {
       await client.destroy();
     }

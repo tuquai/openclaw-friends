@@ -1,4 +1,5 @@
 const TUQU_API_BASE = "https://photo.tuqu.ai";
+const BILLING_API_BASE = "https://billing.tuqu.ai/api/v1/recharge";
 
 type GenerateCharacterPayload = {
   userKey: string;
@@ -62,7 +63,7 @@ export async function generateCharacterImage(payload: GenerateCharacterPayload):
     throwTuquError(json, response.status);
   }
 
-  return json.data.imageUrl;
+  return json.data!.imageUrl!;
 }
 
 export async function generateFreestyleImage(payload: GenerateFreestylePayload): Promise<string> {
@@ -84,5 +85,65 @@ export async function generateFreestyleImage(payload: GenerateFreestylePayload):
     throwTuquError(json, response.status);
   }
 
-  return json.data.imageUrl;
+  return json.data!.imageUrl!;
+}
+
+// ── Billing / Recharge API ──────────────────────────────────────────
+
+export type RechargePlan = {
+  id: string;
+  name: string;
+  priceAmount: number;
+  priceCurrency: string;
+  tokenGrant: number;
+  bonusToken: number;
+};
+
+export async function listRechargePlans(serviceKey: string): Promise<RechargePlan[]> {
+  const response = await fetch(`${BILLING_API_BASE}/plans`, {
+    headers: { Authorization: `Bearer ${serviceKey}` }
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to list recharge plans (${response.status})`);
+  }
+  const json = (await response.json()) as { data?: { plans?: RechargePlan[] } };
+  return json.data?.plans ?? [];
+}
+
+export async function createWechatPayment(
+  serviceKey: string,
+  planId: string
+): Promise<{ qrcodeImg?: string; payUrl?: string }> {
+  const response = await fetch(`${BILLING_API_BASE}/wechat`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ planId })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to create WeChat payment (${response.status})`);
+  }
+  const json = (await response.json()) as { data?: { qrcodeImg?: string; payUrl?: string } };
+  return json.data ?? {};
+}
+
+export async function createStripePayment(
+  serviceKey: string,
+  planId: string
+): Promise<{ checkoutUrl?: string; qrcodeImg?: string }> {
+  const response = await fetch(`${BILLING_API_BASE}/stripe`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${serviceKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ planId })
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to create Stripe payment (${response.status})`);
+  }
+  const json = (await response.json()) as { data?: { checkoutUrl?: string; qrcodeImg?: string } };
+  return json.data ?? {};
 }

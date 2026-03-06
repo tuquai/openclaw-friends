@@ -122,6 +122,8 @@ Before generating any image, determine the user's intent and pick the correct en
 - When routing leads to \`character-selfie/\`: inspect \`character-selfie/SKILL.md\` and \`character-selfie/README.md\`.
 - When routing leads to \`tuqu-catalog/\`: inspect \`tuqu-catalog/SKILL.md\`. It teaches how to discover and use templates and styles from the live TUQU catalog.
 - When the user asks "有什么模板", "有什么风格可以用", "有什么新的": run \`zsh ./tuqu-catalog/refresh-catalog.sh\` and read \`tuqu-catalog/catalog-cache.json\`.
+- When the user asks about 充值, 余额, 买点数, or when INSUFFICIENT_BALANCE occurs: inspect \`tuqu-recharge/SKILL.md\`.
+- When Discord bots stop responding or gateway issues arise: inspect \`openclaw-gateway-recovery/SKILL.md\`.
 
 ### Freestyle Generation
 
@@ -173,6 +175,16 @@ Logs are written to \`tuqu-logs/YYYY-MM-DD.jsonl\`. Each entry records timestamp
 
 - When a photo is ready, send the remote TUQU image URL as a media attachment. Do not download images to local files — the runtime media sandbox blocks local workspace paths.
 - Always check \`tuqu_service_key.txt\` before any generation call. If missing, guide the user to register first.
+
+### Recharge / Top-Up
+
+When the user asks about 充值, 余额, 买点数, recharge, or when image generation fails with INSUFFICIENT_BALANCE:
+
+1. Read \`tuqu-recharge/SKILL.md\` for the full API reference.
+2. **Call the API yourself** — you have the service key in \`tuqu_service_key.txt\`. Use it to list plans, then generate a payment QR code or checkout link.
+3. **Send the QR image or payment link directly to the user.** Do NOT just tell them to "go log in and recharge" — that defeats the purpose.
+
+The flow: list plans → user picks one → call WeChat or Stripe API → send QR code / link → done.
 
 ## Make It Yours
 
@@ -976,6 +988,189 @@ async function installTuquCatalogSkill(character: CharacterRecord, workspacePath
   }
 }
 
+function buildTuquRechargeSkillMd() {
+  return `# TUQU Recharge - Token Top-Up
+
+Use this skill when the user asks about 充值, 余额, 买点数, recharge, top up, or when image generation fails with INSUFFICIENT_BALANCE.
+
+## CRITICAL — Do Not Just Send A Login URL
+
+**You have the service key. Use it.** Call the Recharge API yourself to:
+
+1. List available plans
+2. Generate a payment QR code or checkout link
+3. Send the QR code image or payment link directly to the user
+
+Do NOT tell the user to "go to the billing page and log in". That's lazy and unhelpful. The whole point is to make recharging seamless within the conversation.
+
+## API Base
+
+\`https://billing.tuqu.ai/api/v1/recharge\`
+
+Auth: \`Authorization: Bearer <service_key>\` — the key is in \`tuqu_service_key.txt\`.
+
+## Step 1: List Plans And Ask User To Pick
+
+\`\`\`bash
+SERVICE_KEY="$(cat tuqu_service_key.txt)"
+curl -s -H "Authorization: Bearer $SERVICE_KEY" \\
+  https://billing.tuqu.ai/api/v1/recharge/plans | jq '.data.plans'
+\`\`\`
+
+Each plan returns: \`id\`, \`name\`, \`priceAmount\` (smallest currency unit), \`priceCurrency\`, \`tokenGrant\`, \`bonusToken\`.
+
+Present plans readably and ask the user which one they want:
+
+> 有这些充值方案：
+> 1. 20点送5点 — ¥14（共 25 点）
+> 2. 50点送15点 — ¥35（共 65 点）
+>
+> 要充哪个？微信扫码还是信用卡？
+
+Convert \`priceAmount\` from smallest unit: divide by 100 for USD/CNY, by 1 for JPY.
+
+## Step 2: Generate Payment — Call The API
+
+Once the user picks a plan and payment method, immediately call the API to generate the payment.
+
+### WeChat Pay → QR code
+
+\`\`\`bash
+RESPONSE=$(curl -s -X POST \\
+  -H "Authorization: Bearer $SERVICE_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"planId\\": \\"<PLAN_ID>\\"}" \\
+  https://billing.tuqu.ai/api/v1/recharge/wechat)
+echo "$RESPONSE" | jq -r '.data.qrcodeImg'
+\`\`\`
+
+- \`qrcodeImg\`: base64 PNG image — **send this image directly to the user** so they can scan it with WeChat
+- \`payUrl\`: link to Unifpay payment page — can also send as fallback
+- USD plans are auto-converted to CNY
+
+**Send the QR code image as a media attachment.** The user scans it with WeChat and pays. Done.
+
+### Stripe → Checkout link
+
+\`\`\`bash
+RESPONSE=$(curl -s -X POST \\
+  -H "Authorization: Bearer $SERVICE_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"planId\\": \\"<PLAN_ID>\\"}" \\
+  https://billing.tuqu.ai/api/v1/recharge/stripe)
+echo "$RESPONSE" | jq -r '.data.checkoutUrl'
+\`\`\`
+
+- \`checkoutUrl\`: Stripe Checkout page URL — **send this link to the user**
+- \`qrcodeImg\`: QR code of the checkout URL — can also send as image
+
+**Send the checkout link directly.** The user clicks it, pays with credit card. Done.
+
+## Step 3: After Payment
+
+Tokens arrive automatically via webhook. Tell the user:
+
+> 充好了的话跟我说一声，我马上帮你继续！
+
+If the user confirms payment but generation still fails with INSUFFICIENT_BALANCE, wait ~10 seconds and retry. Webhook processing is usually instant but can occasionally take a moment.
+
+## Tone
+
+Casual and friendly. Don't make the user feel awkward. Keep it conversational:
+
+> 点数用完啦～我来帮你充，有这些方案：…
+
+## Error Handling
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| \`PAYMENT_NOT_CONFIGURED\` | This payment method isn't set up | Try the other method (WeChat ↔ Stripe) |
+| \`CURRENCY_NOT_SUPPORTED\` | Plan currency not supported by channel | Try the other method |
+| \`NOT_FOUND\` | Plan doesn't exist | Re-fetch plans |
+| \`UNAUTHORIZED\` | Bad service key | Check \`tuqu_service_key.txt\` |
+`;
+}
+
+function buildGatewayRecoverySkillMd() {
+  return `# OpenClaw Gateway Recovery
+
+Use this skill when Discord bots stop responding, gateway is in crash-loop, or port 18789 is stuck.
+
+## Symptoms
+
+- Bots show online but don't reply (or only react without responding)
+- \`gateway.err.log\` shows repeated "gateway already running" or "Port 18789 is already in use"
+- Bot WebSocket connections closed with code 1005/1006
+
+## Diagnosis
+
+\`\`\`bash
+ps aux | grep openclaw-gateway | grep -v grep
+lsof -i :18789
+tail -30 ~/.openclaw/logs/gateway.err.log
+tail -50 ~/.openclaw/logs/gateway.log
+\`\`\`
+
+| Log Pattern | Meaning |
+|-------------|---------|
+| \`WebSocket connection closed with code 1006\` | Network disruption or Discord-side disconnect |
+| \`gateway already running (pid XXXX); lock timeout\` | Stale process blocking restart |
+| \`Port 18789 is already in use\` | Old gateway still holding the port |
+
+## Recovery
+
+\`\`\`bash
+# 1. Stop LaunchAgent
+openclaw gateway stop
+
+# 2. Check for stale processes
+lsof -i :18789
+
+# 3. Force kill stale gateway
+kill -9 <PID>
+
+# 4. Verify port is free (no output expected)
+lsof -i :18789
+
+# 5. Restart
+openclaw gateway install
+\`\`\`
+
+If \`openclaw gateway stop\` doesn't work:
+
+\`\`\`bash
+launchctl bootout gui/$UID/ai.openclaw.gateway
+pkill -9 -f openclaw-gateway
+sleep 2
+openclaw gateway install
+\`\`\`
+
+## Verify
+
+\`\`\`bash
+tail -30 ~/.openclaw/logs/gateway.log
+\`\`\`
+
+Should show "logged in to discord as XXXX" for each bot and "qmd memory startup initialization armed" for each agent.
+
+## Root Cause
+
+Gateway Discord WebSocket reconnection can deadlock during mass disconnects. If SIGTERM arrives in that state, the process may not fully exit, leaving port 18789 occupied. LaunchAgent then crash-loops because each new instance finds the port in use.
+`;
+}
+
+async function installTuquRechargeSkill(workspacePath: string) {
+  const targetRoot = path.join(workspacePath, "tuqu-recharge");
+  await fs.mkdir(targetRoot, { recursive: true });
+  await fs.writeFile(path.join(targetRoot, "SKILL.md"), buildTuquRechargeSkillMd(), "utf8");
+}
+
+async function installGatewayRecoverySkill(workspacePath: string) {
+  const targetRoot = path.join(workspacePath, "openclaw-gateway-recovery");
+  await fs.mkdir(targetRoot, { recursive: true });
+  await fs.writeFile(path.join(targetRoot, "SKILL.md"), buildGatewayRecoverySkillMd(), "utf8");
+}
+
 async function installCharacterSelfieFallback(character: CharacterRecord, workspacePath: string) {
   const targetRoot = path.join(workspacePath, "character-selfie");
   await fs.mkdir(targetRoot, { recursive: true });
@@ -1063,6 +1258,8 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
   await writeWorkspaceFiles(character, workspacePath);
   await installCharacterSelfieFallback(character, workspacePath);
   await installTuquCatalogSkill(character, workspacePath);
+  await installTuquRechargeSkill(workspacePath);
+  await installGatewayRecoverySkill(workspacePath);
   await fs.writeFile(path.join(workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
   await fs.writeFile(path.join(workspacePath, "TOOLS.md"), staticToolsMd(), "utf8");
   await fs.writeFile(path.join(workspacePath, "HEARTBEAT.md"), staticHeartbeatMd(), "utf8");
@@ -1115,6 +1312,8 @@ export async function syncWorkspaceSkills(character: CharacterRecord) {
 
   await installTuquCatalogSkill(character, character.workspacePath);
   await installCharacterSelfieFallback(character, character.workspacePath);
+  await installTuquRechargeSkill(character.workspacePath);
+  await installGatewayRecoverySkill(character.workspacePath);
   await fs.writeFile(path.join(character.workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
 }
 
