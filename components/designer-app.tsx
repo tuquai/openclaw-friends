@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { buildDiscordAccountId } from "@/lib/discord-account";
 import {
+  AppLanguage,
   BlueprintPackage,
   CharacterRecord,
   DiscordLink,
@@ -23,6 +24,7 @@ import {
   QUESTION_OPTIONS,
   summarizeMbti
 } from "@/lib/mbti";
+import { APP_LANGUAGES, getLanguageLabel, t, translateOption } from "@/lib/i18n";
 
 type DesignerAppProps = {
   initialCharacters: CharacterRecord[];
@@ -32,12 +34,30 @@ type DesignerAppProps = {
 type DesignerViewMode = "browse" | "edit";
 type EditorStep = "profile" | "details" | "discord" | "tuqu";
 
-const EDITOR_STEPS: Array<{ key: EditorStep; title: string; description: string }> = [
-  { key: "profile", title: "角色信息", description: "填写角色基础信息和关系问卷" },
-  { key: "details", title: "角色详情", description: "预览蓝图并修改 markdown" },
-  { key: "discord", title: "Discord 设置", description: "配置频道、用户和 bot token" },
-  { key: "tuqu", title: "TuQu 设置", description: "配置 Service Key 和角色 ID" }
-];
+function getEditorSteps(language: AppLanguage): Array<{ key: EditorStep; title: string; description: string }> {
+  return [
+    {
+      key: "profile",
+      title: t(language, "step.profile.title"),
+      description: t(language, "step.profile.description")
+    },
+    {
+      key: "details",
+      title: t(language, "step.details.title"),
+      description: t(language, "step.details.description")
+    },
+    {
+      key: "discord",
+      title: t(language, "step.discord.title"),
+      description: t(language, "step.discord.description")
+    },
+    {
+      key: "tuqu",
+      title: t(language, "step.tuqu.title"),
+      description: t(language, "step.tuqu.description")
+    }
+  ];
+}
 
 const defaultCharacterPersonality = {
   socialEnergy: PERSONALITY_AXIS_OPTIONS.socialEnergy[0].value,
@@ -55,26 +75,22 @@ const defaultUserPersonality = {
   otherNotes: ""
 };
 
-const initialDraft: DraftCharacterInput = {
-  name: "",
-  age: "",
-  gender: "",
-  occupation: "",
-  heritage: "",
-  worldSetting: "当代地球",
-  concept: "",
-  mbti: inferMbtiFromAxes(defaultCharacterPersonality),
-  personality: defaultCharacterPersonality,
-  photos: [],
-  preset: "Custom"
-};
-
-const initialUserProfile: UserProfileInput = {
-  userMbti: inferMbtiFromAxes(defaultUserPersonality),
-  userPersonality: defaultUserPersonality,
-  lifeStage: { selected: QUESTION_OPTIONS.lifeStage[3], custom: "" },
-  communicationPreference: { selected: QUESTION_OPTIONS.communicationPreference[0], custom: "" }
-};
+function buildInitialDraft(language: AppLanguage): DraftCharacterInput {
+  return {
+    name: "",
+    age: "",
+    gender: "",
+    occupation: "",
+    heritage: "",
+    worldSetting: "当代地球",
+    concept: "",
+    mbti: inferMbtiFromAxes(defaultCharacterPersonality),
+    personality: defaultCharacterPersonality,
+    language,
+    photos: [],
+    preset: "Custom"
+  };
+}
 
 const initialRelationshipQuestionnaire: RelationshipQuestionnaireInput = {
   userNameForRole: "",
@@ -119,11 +135,16 @@ function defaultTuquConfig(): TuquConfig {
   };
 }
 
-function characterPreview(character: CharacterRecord) {
+function characterPreview(character: CharacterRecord, language: AppLanguage) {
+  const fallbackOccupation =
+    language === "en" ? "No role yet" : language === "ja" ? "未設定" : "未填身份";
+  const fallbackWorld =
+    language === "en" ? "No world setting" : language === "ja" ? "世界観未設定" : "未设定世界观";
+
   return (
     character.blueprintPackage?.summary.oneLiner ||
     character.concept ||
-    `${character.occupation || "未填身份"} / ${character.worldSetting || "未设定世界观"}`
+    `${character.occupation || fallbackOccupation} / ${character.worldSetting || fallbackWorld}`
   ).trim();
 }
 
@@ -147,6 +168,22 @@ function snapshotRelationshipQuestionnaire(input: RelationshipQuestionnaireInput
   return JSON.stringify(input);
 }
 
+function formatAgeLabel(language: AppLanguage, age: string) {
+  if (!age.trim()) {
+    return "";
+  }
+
+  if (language === "en") {
+    return `${age} y/o`;
+  }
+
+  if (language === "ja") {
+    return `${age}歳`;
+  }
+
+  return `${age} 岁`;
+}
+
 function isBrowserAccessiblePhoto(photo: string) {
   return (
     photo.startsWith("/") ||
@@ -161,7 +198,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   const [selectedId, setSelectedId] = useState(initialCharacters[0]?.id ?? "");
   const [viewMode, setViewMode] = useState<DesignerViewMode>(initialCharacters.length ? "browse" : "edit");
   const [editorStep, setEditorStep] = useState<EditorStep>("profile");
-  const [draft, setDraft] = useState(initialDraft);
+  const [draft, setDraft] = useState(() => buildInitialDraft(initialUserProfileProp.language));
   const [userProfile, setUserProfile] = useState(initialUserProfileProp);
   const [relationshipQuestionnaire, setRelationshipQuestionnaire] = useState(initialRelationshipQuestionnaire);
   const [discordLinkDraft, setDiscordLinkDraft] = useState<DiscordLink>(emptyDiscordLink());
@@ -176,8 +213,10 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     running: false,
     accounts: []
   });
-  const [status, setStatus] = useState("准备创建新角色。");
-  const [userProfileStatus, setUserProfileStatus] = useState("关于我会自动保存，创建新角色时直接复用。");
+  const [status, setStatus] = useState(() => t(initialUserProfileProp.language, "status.readyCreate"));
+  const [userProfileStatus, setUserProfileStatus] = useState(() =>
+    t(initialUserProfileProp.language, "status.userAutoSave")
+  );
   const [workspaceStatus, setWorkspaceStatus] = useState("");
   const [discordStatus, setDiscordStatus] = useState("");
   const [blueprintFilesStatus, setBlueprintFilesStatus] = useState("");
@@ -187,6 +226,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   const [isSaving, startSaving] = useTransition();
   const [isAdvancingProfile, startAdvancingProfile] = useTransition();
   const [isSavingDiscord, startSavingDiscord] = useTransition();
+  const [isRepairingOpenClawRegistration, startRepairingOpenClawRegistration] = useTransition();
   const [isSavingBlueprintFiles, startSavingBlueprintFiles] = useTransition();
   const [isSavingTuqu, startSavingTuqu] = useTransition();
   const [isCreatingTuquCharacter, startCreatingTuquCharacter] = useTransition();
@@ -201,7 +241,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   const userProfileSavedSnapshotRef = useRef(
     snapshotUserProfile(initialUserProfileProp)
   );
-  const draftBaselineSnapshotRef = useRef(snapshotDraft(initialDraft));
+  const draftBaselineSnapshotRef = useRef(snapshotDraft(buildInitialDraft(initialUserProfileProp.language)));
   const userProfileBaselineSnapshotRef = useRef(snapshotUserProfile(initialUserProfileProp));
   const relationshipBaselineSnapshotRef = useRef(
     snapshotRelationshipQuestionnaire(initialRelationshipQuestionnaire)
@@ -209,6 +249,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   
 
   const selected = characters.find((character) => character.id === selectedId) ?? null;
+  const uiLanguage = userProfile.language;
+  const editorSteps = getEditorSteps(uiLanguage);
   const selectedDiscordAccountId = selected ? buildDiscordAccountId(selected.name, selected.id) : "";
   const savedDiscordAccounts = Object.values(discordRuntimeConfig.accounts);
   const isEditingExisting = Boolean(selected);
@@ -224,8 +266,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   const optionalDeepeningQuestions = safeList(
     selected?.blueprintPackage?.followups.optionalDeepeningQuestions
   );
-  const currentEditorStepIndex = EDITOR_STEPS.findIndex((step) => step.key === editorStep);
-  const currentEditorStepMeta = EDITOR_STEPS[currentEditorStepIndex] ?? EDITOR_STEPS[0];
+  const currentEditorStepIndex = editorSteps.findIndex((step) => step.key === editorStep);
+  const currentEditorStepMeta = editorSteps[currentEditorStepIndex] ?? editorSteps[0];
   const currentDraftSnapshot = snapshotDraft(serializedDraft());
   const currentUserProfileSnapshot = snapshotUserProfile({
     ...userProfile,
@@ -239,7 +281,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   const canJumpToAnyStep = Boolean(selected?.workspacePath);
 
   useEffect(() => {
-    setDraft(selected ? draftFromCharacter(selected) : initialDraft);
+    const emptyDraft = buildInitialDraft(userProfile.language);
+    setDraft(selected ? draftFromCharacter(selected) : emptyDraft);
     setRelationshipQuestionnaire(selected?.questionnaire ?? initialRelationshipQuestionnaire);
     setDiscordLinkDraft(selected?.discordLink ?? emptyDiscordLink());
     setTuquConfigDraft(selected?.tuquConfig ?? defaultTuquConfig());
@@ -249,7 +292,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     setBlueprintFilesStatus("");
     setWorkspaceStatus("");
     setShowTuquCharacterInfo(false);
-    draftBaselineSnapshotRef.current = snapshotDraft(selected ? draftFromCharacter(selected) : initialDraft);
+    draftBaselineSnapshotRef.current = snapshotDraft(selected ? draftFromCharacter(selected) : emptyDraft);
     userProfileBaselineSnapshotRef.current = snapshotUserProfile({
       ...userProfile,
       userMbti: inferMbtiFromAxes(userProfile.userPersonality)
@@ -258,6 +301,10 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
       selected?.questionnaire ?? initialRelationshipQuestionnaire
     );
   }, [selected]);
+
+  useEffect(() => {
+    setUserProfileStatus(t(uiLanguage, "status.userAutoSave"));
+  }, [uiLanguage]);
 
   useEffect(() => {
     if (!selectedDiscordAccountId) {
@@ -290,7 +337,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     const controller = new AbortController();
     const timeoutId = window.setTimeout(async () => {
       try {
-        setUserProfileStatus("正在保存“关于我”...");
+        setUserProfileStatus(t(uiLanguage, "status.userSaving"));
         const response = await fetch("/api/user-profile", {
           method: "POST",
           headers: {
@@ -304,15 +351,15 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         });
         const json = (await response.json()) as { userProfile?: UserProfileInput; error?: string };
         if (!response.ok || !json.userProfile) {
-          throw new Error(json.error ?? "保存“关于我”失败");
+          throw new Error(json.error ?? t(uiLanguage, "status.userSaveFailed"));
         }
         userProfileSavedSnapshotRef.current = snapshotUserProfile(json.userProfile);
-        setUserProfileStatus("“关于我”已自动保存，新角色会直接复用。");
+        setUserProfileStatus(t(uiLanguage, "status.userSaved"));
       } catch (error) {
         if ((error as Error).name === "AbortError") {
           return;
         }
-        setUserProfileStatus(error instanceof Error ? error.message : "保存“关于我”失败");
+        setUserProfileStatus(error instanceof Error ? error.message : t(uiLanguage, "status.userSaveFailed"));
       }
     }, 400);
 
@@ -320,7 +367,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [userProfile, inferredUserMbti]);
+  }, [userProfile, inferredUserMbti, uiLanguage]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files?.length) {
@@ -491,16 +538,16 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   }
 
   function draftPhotoPreviewSrc(photo: string, index: number) {
+    if (selected && index === 0) {
+      return characterAvatarSrc(selected);
+    }
+
     if (photo.startsWith("/uploads/")) {
       return photo;
     }
 
     if (isBrowserAccessiblePhoto(photo)) {
       return photo;
-    }
-
-    if (selected && index === 0) {
-      return characterAvatarSrc(selected);
     }
 
     return photo;
@@ -592,14 +639,14 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
   function startNewCharacter() {
     setSelectedId("");
     setEditorStep("profile");
-    setDraft(initialDraft);
+    setDraft(buildInitialDraft(userProfile.language));
     setRelationshipQuestionnaire(initialRelationshipQuestionnaire);
     setDiscordLinkDraft(emptyDiscordLink());
     setTuquConfigDraft(defaultTuquConfig());
     setBlueprintFilesDraft(emptyBlueprintFiles());
     setDiscordBotTokenDraft("");
     setViewMode("edit");
-    setStatus("已切换到新建模式。");
+    setStatus(t(uiLanguage, "status.newMode"));
   }
 
   function openWorkspacePicker() {
@@ -641,7 +688,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         setShowWorkspacePicker(false);
         setViewMode("edit");
         setEditorStep("profile");
-        setStatus(`已导入 workspace 角色「${json.character.name}」，可以编辑并补全缺失的配置。`);
+        setStatus(t(uiLanguage, "status.workspaceImported", { name: json.character.name }));
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "导入 workspace 失败");
       }
@@ -652,7 +699,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     setSelectedId(characterId);
     setEditorStep("profile");
     setViewMode("edit");
-    setStatus("已进入角色编辑页。");
+    setStatus(t(uiLanguage, "status.enterEditor"));
   }
 
   function goBackToBrowse() {
@@ -844,6 +891,46 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     return json.character;
   }
 
+  async function repairOpenClawRegistration() {
+    if (!selected) {
+      throw new Error(t(uiLanguage, "discord.completeProfileFirst"));
+    }
+
+    setDiscordStatus(t(uiLanguage, "status.discordRepairing"));
+    const response = await fetch("/api/openclaw/register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        characterId: selected.id
+      })
+    });
+    const json = (await response.json()) as {
+      character?: CharacterRecord;
+      agentId?: string;
+      accountId?: string;
+      guildId?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !json.character || !json.agentId || !json.accountId || !json.guildId) {
+      throw new Error(json.error ?? "修复 OpenClaw 注册失败");
+    }
+
+    mergeCharacterRecord(json.character);
+    setDiscordLinkDraft(json.character.discordLink ?? emptyDiscordLink());
+    setDiscordStatus(
+      t(uiLanguage, "status.discordRepairDone", {
+        agentId: json.agentId,
+        accountId: json.accountId,
+        guildId: json.guildId
+      })
+    );
+
+    return json.character;
+  }
+
   async function saveTuquConfig() {
     if (!selected) {
       throw new Error("请先创建并选中一个角色。");
@@ -900,7 +987,11 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     }
 
     setEditorStep(step);
-    setStatus(`已切换到${EDITOR_STEPS.find((item) => item.key === step)?.title ?? "对应步骤"}。`);
+    setStatus(
+      t(uiLanguage, "status.stepChanged", {
+        step: editorSteps.find((item) => item.key === step)?.title ?? t(uiLanguage, "status.stepTarget")
+      })
+    );
   }
 
   function handleProfileNext() {
@@ -908,7 +999,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
       try {
         if (selected?.workspacePath && selected.blueprintPackage && !isProfileStepDirty) {
           setEditorStep("details");
-          setStatus("第一步没有修改，已直接进入角色详情。");
+          setStatus(t(uiLanguage, "status.profileNoChanges"));
           return;
         }
 
@@ -973,6 +1064,16 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
     setDiscordStatus("已跳过 Discord 设置。");
     setEditorStep("tuqu");
     setStatus("已跳过 Discord 设置，继续配置 TuQu。");
+  }
+
+  function handleRepairOpenClawRegistration() {
+    startRepairingOpenClawRegistration(async () => {
+      try {
+        await repairOpenClawRegistration();
+      } catch (error) {
+        setDiscordStatus(error instanceof Error ? error.message : "修复 OpenClaw 注册失败");
+      }
+    });
   }
 
   function handleTuquPrevious() {
@@ -1081,29 +1182,29 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h3>我的信息</h3>
-              <p>这里记录稳定的用户信息。修改后会自动保存，后续新建角色时直接复用。</p>
+              <h3>{t(uiLanguage, "panel.user.title")}</h3>
+              <p>{t(uiLanguage, "panel.user.description")}</p>
             </div>
           </div>
 
           <div className="subsection-header">
-            <h4>关于我</h4>
+            <h4>{t(uiLanguage, "subsection.aboutMe")}</h4>
             <span className="status">{userProfileStatus}</span>
           </div>
           <div className="question-grid">
             <div className="field-full">
-              <label>你的性格倾向</label>
+              <label>{t(uiLanguage, "field.userPersonality")}</label>
               <div className="option-grid">
                 {(Object.keys(PERSONALITY_AXIS_OPTIONS) as Array<keyof typeof PERSONALITY_AXIS_OPTIONS>).map((key) => (
                   <div className="option-card" key={key}>
-                    <span className="option-title">{axisLabel(key, false)}</span>
+                    <span className="option-title">{axisLabel(key, false, uiLanguage)}</span>
                     <select
                       onChange={(event) => handleUserPersonalityChange(key, event.target.value)}
                       value={userProfile.userPersonality[key]}
                     >
                       {PERSONALITY_AXIS_OPTIONS[key].map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {translateOption(uiLanguage, option.value)}
                         </option>
                       ))}
                     </select>
@@ -1112,30 +1213,32 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               </div>
               <textarea
                 onChange={(event) => handleUserPersonalityChange("otherNotes", event.target.value)}
-                placeholder="其他补充：比如社恐但熟了会很能聊，或很理性但会心软。"
+                placeholder={t(uiLanguage, "placeholder.userNotes")}
                 value={userProfile.userPersonality.otherNotes}
               />
               <div className="inline-note">
-                推测 MBTI：<strong>{inferredUserMbti}</strong>
+                {t(uiLanguage, "mbti.inferred")} <strong>{inferredUserMbti}</strong>
                 {activeUserPreset ? ` · ${activeUserPreset.title}` : ""}
               </div>
             </div>
 
             <ChoiceField
               field={userProfile.lifeStage}
-              label="你现在的阶段"
+              label={t(uiLanguage, "field.lifeStage")}
+              language={uiLanguage}
               onChange={(field, value) => handleUserSingleChoiceChange("lifeStage", field, value)}
               options={QUESTION_OPTIONS.lifeStage}
             />
 
             <ChoiceField
               field={userProfile.communicationPreference}
-              label="你更喜欢对方用什么方式和你沟通"
+              label={t(uiLanguage, "field.communicationPreference")}
+              language={uiLanguage}
               onChange={(field, value) => handleUserSingleChoiceChange("communicationPreference", field, value)}
               options={QUESTION_OPTIONS.communicationPreference}
             />
           </div>
-          <div className="footer-note">这里会自动保存，不需要单独点击保存按钮。</div>
+          <div className="footer-note">{t(uiLanguage, "user.footer")}</div>
         </div>
       </section>
     );
@@ -1147,18 +1250,18 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h3>我们的关系</h3>
-              <p>这里是当前角色专属的关系设定，只会影响这个角色的生成结果。</p>
+              <h3>{t(uiLanguage, "panel.relationship.title")}</h3>
+              <p>{t(uiLanguage, "panel.relationship.description")}</p>
             </div>
           </div>
 
           <div className="subsection-header">
-            <h4>关于我和 ta 的关系</h4>
-            <span className="status">这一部分只属于当前角色。</span>
+            <h4>{t(uiLanguage, "subsection.relationship")}</h4>
+            <span className="status">{t(uiLanguage, "status.relationshipOnly")}</span>
           </div>
           <div className="question-grid">
             <div className="field-full">
-              <label htmlFor="user-name-for-role">角色如何称呼你</label>
+              <label htmlFor="user-name-for-role">{t(uiLanguage, "field.userNameForRole")}</label>
               <input
                 id="user-name-for-role"
                 onChange={(event) =>
@@ -1167,21 +1270,23 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                     userNameForRole: event.target.value
                   }))
                 }
-                placeholder="例如：admin、周一舟、哥哥、主人"
+                placeholder={t(uiLanguage, "placeholder.userNameForRole")}
                 value={relationshipQuestionnaire.userNameForRole}
               />
             </div>
 
             <ChoiceField
               field={relationshipQuestionnaire.desiredBond}
-              label="你希望你们之间是什么样的相处感觉"
+              label={t(uiLanguage, "field.desiredBond")}
+              language={uiLanguage}
               onChange={(field, value) => handleRelationshipSingleChoiceChange("desiredBond", field, value)}
               options={QUESTION_OPTIONS.desiredBond}
             />
 
             <CheckboxField
               field={relationshipQuestionnaire.treatmentPreference}
-              label="你更希望对方怎么对待你"
+              label={t(uiLanguage, "field.treatmentPreference")}
+              language={uiLanguage}
               onCustomChange={(value) => handleMultiChoiceCustomChange("treatmentPreference", value)}
               onToggle={(value) => handleMultiChoiceToggle("treatmentPreference", value)}
               options={QUESTION_OPTIONS.treatmentPreference}
@@ -1189,14 +1294,19 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
 
             <CheckboxField
               field={relationshipQuestionnaire.specialTraits}
-              label="你愿意让角色带哪些属性"
+              label={t(uiLanguage, "field.specialTraits")}
+              language={uiLanguage}
               onCustomChange={(value) => handleMultiChoiceCustomChange("specialTraits", value)}
               onToggle={(value) => handleMultiChoiceToggle("specialTraits", value)}
               options={QUESTION_OPTIONS.specialTraits}
             />
 
             <div className="field-full">
-              <label htmlFor="favorability">初始好感值：{relationshipQuestionnaire.affectionPlan.initialFavorability}</label>
+              <label htmlFor="favorability">
+                {t(uiLanguage, "field.initialFavorability", {
+                  value: relationshipQuestionnaire.affectionPlan.initialFavorability
+                })}
+              </label>
               <input
                 id="favorability"
                 max={100}
@@ -1214,9 +1324,9 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                 value={relationshipQuestionnaire.affectionPlan.initialFavorability}
               />
               <div className="range-labels">
-                <span>陌生</span>
-                <span>普通熟悉</span>
-                <span>高好感开局</span>
+                <span>{t(uiLanguage, "range.stranger")}</span>
+                <span>{t(uiLanguage, "range.familiar")}</span>
+                <span>{t(uiLanguage, "range.high")}</span>
               </div>
             </div>
 
@@ -1225,7 +1335,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                 selected: relationshipQuestionnaire.affectionPlan.growthRoute,
                 custom: relationshipQuestionnaire.affectionPlan.growthRouteCustom
               }}
-              label="好感值提升路线"
+              label={t(uiLanguage, "field.affectionGrowthRoute")}
+              language={uiLanguage}
               onChange={(field, value) =>
                 setRelationshipQuestionnaire((current) => ({
                   ...current,
@@ -1239,7 +1350,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
             />
           </div>
 
-          <div className="footer-note">这里的内容会在这一步的下一步里和角色信息一起保存并生成详情。</div>
+          <div className="footer-note">{t(uiLanguage, "relationship.footer")}</div>
         </div>
       </section>
     );
@@ -1251,15 +1362,15 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner">
           <div className="panel-title">
             <div>
-              <h2>现有角色</h2>
-              <p>先在这里选择角色；需要修改时再进入独立编辑页。</p>
+              <h2>{t(uiLanguage, "list.title")}</h2>
+              <p>{t(uiLanguage, "list.description")}</p>
             </div>
             <div className="panel-title-actions">
               <button className="button-primary" onClick={startNewCharacter} type="button">
-                新建角色
+                {t(uiLanguage, "button.newCharacter")}
               </button>
               <button className="button-secondary" onClick={openWorkspacePicker} type="button">
-                同步现有 Workspace
+                {t(uiLanguage, "button.syncWorkspace")}
               </button>
             </div>
           </div>
@@ -1273,7 +1384,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   onClick={() => setSelectedId(character.id)}
                   type="button"
                 >
-                  {character.photos[0] ? (
+                  {character.photos[0] || character.workspacePath ? (
                     <img alt={character.name} className="thumb" src={characterAvatarSrc(character)} />
                   ) : (
                     <div className="thumb thumb-placeholder">{character.name.slice(0, 1)}</div>
@@ -1281,13 +1392,14 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   <div style={{ textAlign: "left" }}>
                     <strong>{character.name}</strong>
                     <div className="meta-line">
-                      {character.age ? <span className="pill">{character.age} 岁</span> : null}
+                      {character.age ? <span className="pill">{formatAgeLabel(uiLanguage, character.age)}</span> : null}
                       {character.mbti ? <span className="pill">{character.mbti}</span> : null}
                       {character.occupation ? <span className="pill warm">{character.occupation}</span> : null}
-                      {character.discordLink ? <span className="pill">Discord 已绑定</span> : null}
-                      {character.workspacePath ? <span className="pill">Workspace 已创建</span> : null}
+                      <span className="pill">{getLanguageLabel(uiLanguage, character.language)}</span>
+                      {character.discordLink ? <span className="pill">{t(uiLanguage, "pill.discordBound")}</span> : null}
+                      {character.workspacePath ? <span className="pill">{t(uiLanguage, "pill.workspaceReady")}</span> : null}
                     </div>
-                    <p className="character-preview">{characterPreview(character)}</p>
+                    <p className="character-preview">{characterPreview(character, uiLanguage)}</p>
                   </div>
                 </button>
                 <div className="card-actions">
@@ -1296,7 +1408,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                     onClick={() => startEditingCharacter(character.id)}
                     type="button"
                   >
-                    编辑
+                    {t(uiLanguage, "button.edit")}
                   </button>
                   <button
                     className="button-danger button-inline-action"
@@ -1304,14 +1416,14 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                     onClick={() => handleDeleteCharacter(character.id, character.name)}
                     type="button"
                   >
-                    删除
+                    {t(uiLanguage, "button.delete")}
                   </button>
                 </div>
               </div>
             ))}
 
             {characters.length === 0 ? (
-              <div className="empty-state">还没有角色。先点右上角“新建角色”。</div>
+              <div className="empty-state">{t(uiLanguage, "empty.noCharacters")}</div>
             ) : null}
           </div>
         </div>
@@ -1325,33 +1437,33 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h2>角色信息</h2>
+              <h2>{t(uiLanguage, "panel.characterInfo.title")}</h2>
               <p>
                 {isEditingExisting
-                  ? "修改基础信息、问卷或 Discord 绑定后，都可以单独保存。"
-                  : "先给角色一个世界、一个感觉，再用更一般的行为问题推测她的 MBTI。"}
+                  ? t(uiLanguage, "panel.characterInfo.editing")
+                  : t(uiLanguage, "panel.characterInfo.creating")}
               </p>
             </div>
           </div>
 
           <div className="form-grid">
             <div className="field">
-              <label htmlFor="name">姓名</label>
+              <label htmlFor="name">{t(uiLanguage, "field.name")}</label>
               <input id="name" onChange={(event) => handleDraftChange("name", event.target.value)} value={draft.name} />
             </div>
 
             <div className="field">
-              <label htmlFor="age">年龄</label>
+              <label htmlFor="age">{t(uiLanguage, "field.age")}</label>
               <input id="age" onChange={(event) => handleDraftChange("age", event.target.value)} value={draft.age} />
             </div>
 
             <div className="field">
-              <label htmlFor="gender">性别</label>
+              <label htmlFor="gender">{t(uiLanguage, "field.gender")}</label>
               <input id="gender" onChange={(event) => handleDraftChange("gender", event.target.value)} value={draft.gender} />
             </div>
 
             <div className="field">
-              <label htmlFor="occupation">身份</label>
+              <label htmlFor="occupation">{t(uiLanguage, "field.occupation")}</label>
               <input
                 id="occupation"
                 onChange={(event) => handleDraftChange("occupation", event.target.value)}
@@ -1360,7 +1472,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
             </div>
 
             <div className="field">
-              <label htmlFor="heritage">背景 / 籍贯</label>
+              <label htmlFor="heritage">{t(uiLanguage, "field.heritage")}</label>
               <input
                 id="heritage"
                 onChange={(event) => handleDraftChange("heritage", event.target.value)}
@@ -1369,38 +1481,53 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
             </div>
 
             <div className="field">
-              <label htmlFor="worldSetting">角色所处世界</label>
+              <label htmlFor="worldSetting">{t(uiLanguage, "field.worldSetting")}</label>
               <input
                 id="worldSetting"
                 onChange={(event) => handleDraftChange("worldSetting", event.target.value)}
-                placeholder="例如：当代地球、修仙界、未来都市、架空王朝"
+                placeholder={t(uiLanguage, "placeholder.worldSetting")}
                 value={draft.worldSetting}
               />
             </div>
 
+            <div className="field">
+              <label htmlFor="character-language">{t(uiLanguage, "language.character")}</label>
+              <select
+                id="character-language"
+                onChange={(event) => handleDraftChange("language", event.target.value as AppLanguage)}
+                value={draft.language}
+              >
+                {APP_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>
+                    {getLanguageLabel(uiLanguage, language)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="field-full">
-              <label htmlFor="concept">角色概念</label>
+              <label htmlFor="concept">{t(uiLanguage, "field.concept")}</label>
               <textarea
                 id="concept"
                 onChange={(event) => handleDraftChange("concept", event.target.value)}
-                placeholder="把你对这个角色的所有看法写在这里：气质、标签、关系想象、审美、设计备注，都可以塞进来。"
+                placeholder={t(uiLanguage, "placeholder.concept")}
                 value={draft.concept}
               />
             </div>
 
             <div className="field-full">
-              <label>角色性格推测</label>
+              <label>{t(uiLanguage, "field.personality")}</label>
               <div className="option-grid">
                 {(Object.keys(PERSONALITY_AXIS_OPTIONS) as Array<keyof typeof PERSONALITY_AXIS_OPTIONS>).map((key) => (
                   <div className="option-card" key={key}>
-                    <span className="option-title">{axisLabel(key, true)}</span>
+                    <span className="option-title">{axisLabel(key, true, uiLanguage)}</span>
                     <select
                       onChange={(event) => handleCharacterPersonalityChange(key, event.target.value)}
                       value={draft.personality[key]}
                     >
                       {PERSONALITY_AXIS_OPTIONS[key].map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {translateOption(uiLanguage, option.value)}
                         </option>
                       ))}
                     </select>
@@ -1409,13 +1536,13 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               </div>
               <textarea
                 onChange={(event) => handleCharacterPersonalityChange("otherNotes", event.target.value)}
-                placeholder="其他补充：比如傲娇、会嘴硬、轻微占有欲、话少但行动派。"
+                placeholder={t(uiLanguage, "placeholder.characterNotes")}
                 value={draft.personality.otherNotes}
               />
             </div>
 
             <div className="field-full">
-              <label htmlFor="photos">角色照片</label>
+              <label htmlFor="photos">{t(uiLanguage, "field.photos")}</label>
               <input
                 id="photos"
                 multiple
@@ -1427,9 +1554,9 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                 type="file"
                 accept="image/*"
               />
-              {draft.photos.length ? (
+              {draft.photos.length || selected?.workspacePath ? (
                 <div className="photo-strip">
-                  {draft.photos.map((photo, idx) => (
+                  {(draft.photos.length ? draft.photos : [characterAvatarSrc(selected!)]).map((photo, idx) => (
                     <img
                       alt="uploaded"
                       data-fallback={selected ? characterAvatarSrc(selected) : ""}
@@ -1451,12 +1578,21 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
           <div className="hint-box">
             <strong>{inferredCharacterMbti}</strong>
             <p style={{ marginBottom: 8 }}>
-              {activePreset ? `${activePreset.title}：${activePreset.defaults.join("、")}。` : "当前维度还不足以稳定推测。"}
+              {activePreset
+                ? `${activePreset.title}${uiLanguage === "en" ? ": " : "："}${activePreset.defaults.join(
+                    uiLanguage === "en" ? ", " : "、"
+                  )}。`
+                : t(uiLanguage, "detail.mbtiInsufficient")}
             </p>
-            {activePreset ? <span className="footer-note">建议节奏：{activePreset.rhythm}</span> : null}
+            {activePreset ? (
+              <span className="footer-note">
+                {t(uiLanguage, "detail.rhythm")}
+                {activePreset.rhythm}
+              </span>
+            ) : null}
           </div>
 
-          <div className="footer-note">先完成角色资料和问卷。点击下一步后会自动更新角色详情并同步 workspace。</div>
+          <div className="footer-note">{t(uiLanguage, "profile.footer")}</div>
         </div>
       </section>
     );
@@ -1475,16 +1611,16 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <section className="panel">
           <div className="panel-inner wizard-footer">
             <div>
-              <h3>下一步</h3>
-              <p>保存角色信息和问卷，生成最新角色详情，并检查对应 workspace；有就更新，没有就创建。</p>
+              <h3>{t(uiLanguage, "wizard.nextTitle")}</h3>
+              <p>{t(uiLanguage, "wizard.nextDescription")}</p>
             </div>
             <div className="actions">
               <button className="button-primary" disabled={isAdvancingProfile} onClick={handleProfileNext} type="button">
-                {isAdvancingProfile ? "处理中..." : "下一步：生成详情并同步 Workspace"}
+                {isAdvancingProfile ? t(uiLanguage, "button.processing") : t(uiLanguage, "button.nextGenerate")}
               </button>
             </div>
             <div className="workspace-feedback">
-              {workspaceStatus || "这一步不能跳过。点击下一步后会自动完成角色保存、蓝图生成和 workspace 同步。"}
+              {workspaceStatus || t(uiLanguage, "status.profileRequired")}
               <br />
               {status}
             </div>
@@ -1500,8 +1636,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h3>Discord 设置</h3>
-              <p>这里保存频道、用户和 bot token。可以直接下一步，也可以跳过。</p>
+              <h3>{t(uiLanguage, "step.discord.title")}</h3>
+              <p>{t(uiLanguage, "discord.description")}</p>
             </div>
           </div>
 
@@ -1511,7 +1647,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <input
                 id="discord-guild-id"
                 onChange={(event) => handleDiscordDraftChange("guildId", event.target.value)}
-                placeholder="可选；留空时会尝试从 Channel ID 自动解析"
+                placeholder={t(uiLanguage, "discord.placeholderServerId")}
                 value={discordLinkDraft.guildId ?? ""}
               />
             </div>
@@ -1521,7 +1657,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <input
                 id="discord-channel-id"
                 onChange={(event) => handleDiscordDraftChange("channelId", event.target.value)}
-                placeholder="OpenClaw 绑定目标频道；当前接管模式下频道内仍需 @mention"
+                placeholder={t(uiLanguage, "discord.placeholderChannelId")}
                 value={discordLinkDraft.channelId}
               />
             </div>
@@ -1531,7 +1667,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <input
                 id="discord-user-id"
                 onChange={(event) => handleDiscordDraftChange("userId", event.target.value)}
-                placeholder="你的 Discord 用户 ID；只允许这个账号和角色交互"
+                placeholder={t(uiLanguage, "discord.placeholderUserId")}
                 value={discordLinkDraft.userId}
               />
             </div>
@@ -1541,7 +1677,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <input
                 id="discord-bot-token"
                 onChange={(event) => handleDiscordRuntimeConfigChange(event.target.value)}
-                placeholder="这只角色 bot 的登录 token"
+                placeholder={t(uiLanguage, "discord.placeholderBotToken")}
                 type="password"
                 value={discordBotTokenDraft}
               />
@@ -1550,24 +1686,34 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
 
           <div className="actions">
             <button className="button-ghost" onClick={handleDiscordPrevious} type="button">
-              上一步
+              {t(uiLanguage, "button.previous")}
             </button>
             <button className="button-secondary" onClick={handleDiscordSkip} type="button">
-              Skip
+              {t(uiLanguage, "button.skip")}
+            </button>
+            <button
+              className="button-ghost"
+              disabled={isRepairingOpenClawRegistration || !selected?.workspacePath || !selected?.discordLink?.channelId || !selected?.discordLink.userId}
+              onClick={handleRepairOpenClawRegistration}
+              type="button"
+            >
+              {isRepairingOpenClawRegistration ? t(uiLanguage, "button.processing") : t(uiLanguage, "button.repairRegistration")}
             </button>
             <button className="button-primary" disabled={isSavingDiscord} onClick={handleDiscordNext} type="button">
-              {isSavingDiscord ? "保存中..." : "下一步"}
+              {isSavingDiscord ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.next")}
             </button>
           </div>
 
           <div className="workspace-feedback">
-            {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
+            {selected?.workspacePath ? `${t(uiLanguage, "detail.currentWorkspace")}${selected.workspacePath}` : t(uiLanguage, "discord.noWorkspace")}
             <br />
             {selected
-              ? `OpenClaw Discord Account ID：${selectedDiscordAccountId}${discordLinkDraft.botId ? ` · Bot User ID：${discordLinkDraft.botId}` : ""}`
-              : "先完成第一步，再为这个角色保存 Discord 配置。"}
+              ? `${t(uiLanguage, "discord.accountId")}${selectedDiscordAccountId}${discordLinkDraft.botId ? ` · ${t(uiLanguage, "discord.botUserId")}${discordLinkDraft.botId}` : ""}`
+              : t(uiLanguage, "discord.completeProfileFirst")}
             <br />
-            {discordStatus || "点“下一步”会保存 Discord 配置；点“Skip”会直接跳过这一项。"}
+            {selected?.workspacePath && selected?.discordLink?.channelId && selected?.discordLink.userId ? t(uiLanguage, "discord.repairHint") : ""}
+            {selected?.workspacePath && selected?.discordLink?.channelId && selected?.discordLink.userId ? <br /> : null}
+            {discordStatus || t(uiLanguage, "discord.footer")}
           </div>
         </div>
       </section>
@@ -1580,14 +1726,14 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h3>TuQu 设置</h3>
-              <p>保存 TuQu Service Key 和角色 ID。完成后会回到主页。</p>
+              <h3>{t(uiLanguage, "step.tuqu.title")}</h3>
+              <p>{t(uiLanguage, "tuqu.description")}</p>
             </div>
           </div>
 
           <div className="form-grid">
             <div className="field-full">
-              <label>注册/充值</label>
+              <label>{t(uiLanguage, "tuqu.registration")}</label>
               <a
                 className="tuqu-registration-link"
                 href={tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
@@ -1603,21 +1749,21 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <input
                 id="tuqu-service-key"
                 onChange={(event) => handleTuquConfigChange("serviceKey", event.target.value)}
-                placeholder="明文保存的 TuQu AI Service Key"
+                placeholder={t(uiLanguage, "tuqu.placeholderServiceKey")}
                 value={tuquConfigDraft.serviceKey}
               />
             </div>
 
             <div className="field-full">
-              <label>TuQu AI Character ID</label>
+              <label>{t(uiLanguage, "tuqu.characterId")}</label>
               <div className="tuqu-character-status-row">
                 {tuquConfigDraft.characterId ? (
                   <span className="pill" style={{ fontSize: "0.92rem" }}>
-                    已注册：{tuquConfigDraft.characterId}
+                    {t(uiLanguage, "tuqu.registered")}{tuquConfigDraft.characterId}
                   </span>
                 ) : (
                   <span className="pill warm" style={{ fontSize: "0.92rem" }}>
-                    尚未注册
+                    {t(uiLanguage, "tuqu.notRegistered")}
                   </span>
                 )}
                 <div className="tuqu-info-anchor">
@@ -1631,18 +1777,18 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   {showTuquCharacterInfo && (
                     <div className="tuqu-info-popover">
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <strong style={{ fontSize: "0.92rem" }}>什么是 TuQu Character？</strong>
+                        <strong style={{ fontSize: "0.92rem" }}>{t(uiLanguage, "tuqu.whatIsCharacter")}</strong>
                         <button
                           className="button-ghost"
                           onClick={() => setShowTuquCharacterInfo(false)}
                           style={{ padding: "4px 10px", fontSize: "0.82rem", borderRadius: "8px" }}
                           type="button"
                         >
-                          关闭
+                          {t(uiLanguage, "button.close")}
                         </button>
                       </div>
                       <p style={{ margin: "8px 0 0", lineHeight: 1.6, fontSize: "0.9rem", color: "var(--muted)" }}>
-                        TuQu Character 是用指定角色的照片及特征介绍创建的一个参考用人物。创建后可以无限为该角色生成照片，而无需提供除了该角色 ID 之外的参数。
+                        {t(uiLanguage, "tuqu.characterInfo")}
                       </p>
                     </div>
                   )}
@@ -1653,23 +1799,23 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
 
           <div className="actions">
             <button className="button-ghost" onClick={handleTuquPrevious} type="button">
-              上一步
+              {t(uiLanguage, "button.previous")}
             </button>
             <button className="button-secondary" onClick={handleTuquSkip} type="button">
-              Skip
+              {t(uiLanguage, "button.skip")}
             </button>
             <button className="button-ghost" disabled={isCreatingTuquCharacter} onClick={handleCreateTuquCharacter} type="button">
-              {isCreatingTuquCharacter ? "创建中..." : "创建 TuQu AI Character"}
+              {isCreatingTuquCharacter ? t(uiLanguage, "button.creating") : t(uiLanguage, "button.createTuquCharacter")}
             </button>
             <button className="button-primary" disabled={isSavingTuqu} onClick={handleTuquFinish} type="button">
-              {isSavingTuqu ? "保存中..." : "完成设置"}
+              {isSavingTuqu ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.finish")}
             </button>
           </div>
 
           <div className="workspace-feedback">
-            {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
+            {selected?.workspacePath ? `${t(uiLanguage, "detail.currentWorkspace")}${selected.workspacePath}` : t(uiLanguage, "tuqu.noWorkspace")}
             <br />
-            {tuquStatus || "点“完成设置”会保存 TuQu 配置并返回主页；点“Skip”会直接结束流程。"}
+            {tuquStatus || t(uiLanguage, "tuqu.footer")}
           </div>
         </div>
       </section>
@@ -1687,8 +1833,8 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner">
           <div className="panel-title">
             <div>
-              <h3>角色详情</h3>
-              <p>{isWizardMode ? "检查生成结果，必要时修改 markdown，再继续下一步。" : "生成后会看到结构化蓝图和可继续编辑的角色信息。"}</p>
+              <h3>{t(uiLanguage, "detail.title")}</h3>
+              <p>{isWizardMode ? t(uiLanguage, "detail.descriptionWizard") : t(uiLanguage, "detail.descriptionBrowse")}</p>
             </div>
           </div>
 
@@ -1697,27 +1843,30 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               <div>
                 <strong style={{ fontSize: "1.4rem" }}>{selected.name}</strong>
                 <div className="meta-line">
-                  {selected.age ? <span className="pill">{selected.age} 岁</span> : null}
+                  {selected.age ? <span className="pill">{formatAgeLabel(uiLanguage, selected.age)}</span> : null}
                   {selected.gender ? <span className="pill">{selected.gender}</span> : null}
                   {selected.mbti ? <span className="pill warm">{selected.mbti}</span> : null}
+                  <span className="pill">{getLanguageLabel(uiLanguage, selected.language)}</span>
                 </div>
               </div>
 
               <div>
-                <h4>基础信息</h4>
+                <h4>{t(uiLanguage, "detail.basicInfo")}</h4>
                 <p>
-                  {selected.occupation || "未填身份"}
+                  {selected.occupation || t(uiLanguage, "detail.emptyOccupation")}
                   {selected.heritage ? ` / ${selected.heritage}` : ""}
                 </p>
-                <p>世界观：{selected.worldSetting || "未设定"}</p>
-                <p>{selected.concept || "还没有角色概念描述。"}</p>
+                <p>{t(uiLanguage, "detail.worldSetting")}{selected.worldSetting || t(uiLanguage, "detail.emptyWorldSetting")}</p>
+                <p>{selected.concept || t(uiLanguage, "detail.emptyConcept")}</p>
               </div>
 
               <div>
-                <h4>人格推测</h4>
+                <h4>{t(uiLanguage, "detail.personality")}</h4>
                 <p>
-                  {selected.mbti} · {selected.personality.socialEnergy} / {selected.personality.informationFocus} /{" "}
-                  {selected.personality.decisionStyle} / {selected.personality.lifestylePace}
+                  {selected.mbti} · {translateOption(uiLanguage, selected.personality.socialEnergy)} /{" "}
+                  {translateOption(uiLanguage, selected.personality.informationFocus)} /{" "}
+                  {translateOption(uiLanguage, selected.personality.decisionStyle)} /{" "}
+                  {translateOption(uiLanguage, selected.personality.lifestylePace)}
                 </p>
                 {selected.personality.otherNotes ? <p>{selected.personality.otherNotes}</p> : null}
               </div>
@@ -1725,13 +1874,13 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
               {selected.blueprintPackage ? (
                 <>
                   <div>
-                    <h4>一句话摘要</h4>
+                    <h4>{t(uiLanguage, "detail.summary")}</h4>
                     <p>{selected.blueprintPackage.summary.oneLiner}</p>
-                    <p>原型：{selected.blueprintPackage.summary.archetype}</p>
+                    <p>{t(uiLanguage, "detail.archetype")}{selected.blueprintPackage.summary.archetype}</p>
                   </div>
 
                   <div>
-                    <h4>核心特质</h4>
+                    <h4>{t(uiLanguage, "detail.coreTraits")}</h4>
                     <ul>
                       {coreTraits.map((item) => (
                         <li key={item}>{item}</li>
@@ -1740,7 +1889,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>说话方式</h4>
+                    <h4>{t(uiLanguage, "detail.speakingStyle")}</h4>
                     <ul>
                       {speakingStyle.map((item) => (
                         <li key={item}>{item}</li>
@@ -1749,14 +1898,14 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>关系叙事</h4>
+                    <h4>{t(uiLanguage, "detail.relationshipStory")}</h4>
                     <p>{selected.blueprintPackage.relationship.backstory}</p>
-                    <p>关系动态：{selected.blueprintPackage.relationship.dynamic}</p>
-                    <p>初始好感：{selected.blueprintPackage.relationship.affectionBaseline}</p>
+                    <p>{t(uiLanguage, "detail.relationshipDynamic")}{selected.blueprintPackage.relationship.dynamic}</p>
+                    <p>{t(uiLanguage, "detail.affectionBaseline")}{selected.blueprintPackage.relationship.affectionBaseline}</p>
                   </div>
 
                   <div>
-                    <h4>好感提升路线</h4>
+                    <h4>{t(uiLanguage, "detail.affectionRoute")}</h4>
                     <ul>
                       {affectionGrowthPath.map((item) => (
                         <li key={item}>{item}</li>
@@ -1765,12 +1914,12 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>如何称呼用户</h4>
-                    <p>{activeRelationshipQuestionnaire.userNameForRole || selected.blueprintPackage.relationship.userAddressingStyle || "未设定"}</p>
+                    <h4>{t(uiLanguage, "detail.addressing")}</h4>
+                    <p>{activeRelationshipQuestionnaire.userNameForRole || selected.blueprintPackage.relationship.userAddressingStyle || t(uiLanguage, "detail.emptyAddressing")}</p>
                   </div>
 
                   <div>
-                    <h4>关系化学反应</h4>
+                    <h4>{t(uiLanguage, "detail.chemistry")}</h4>
                     <ul>
                       {chemistry.map((item) => (
                         <li key={item}>{item}</li>
@@ -1779,7 +1928,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>边界与避免项</h4>
+                    <h4>{t(uiLanguage, "detail.boundaries")}</h4>
                     <ul>
                       {hardBoundaries.map((item) => (
                         <li key={item}>{item}</li>
@@ -1788,7 +1937,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>下一步该补什么</h4>
+                    <h4>{t(uiLanguage, "detail.followups")}</h4>
                     <ul>
                       {optionalDeepeningQuestions.map((item) => (
                         <li key={item}>{item}</li>
@@ -1797,7 +1946,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>编辑 IDENTITY.md</h4>
+                    <h4>{t(uiLanguage, "detail.editIdentity")}</h4>
                     <textarea
                       className="markdown-editor"
                       onChange={(event) => handleBlueprintFileChange("identityMd", event.target.value)}
@@ -1806,7 +1955,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>编辑 SOUL.md</h4>
+                    <h4>{t(uiLanguage, "detail.editSoul")}</h4>
                     <textarea
                       className="markdown-editor"
                       onChange={(event) => handleBlueprintFileChange("soulMd", event.target.value)}
@@ -1815,7 +1964,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>编辑 USER.md</h4>
+                    <h4>{t(uiLanguage, "detail.editUser")}</h4>
                     <textarea
                       className="markdown-editor"
                       onChange={(event) => handleBlueprintFileChange("userMd", event.target.value)}
@@ -1824,7 +1973,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                   </div>
 
                   <div>
-                    <h4>编辑 MEMORY.md</h4>
+                    <h4>{t(uiLanguage, "detail.editMemory")}</h4>
                     <textarea
                       className="markdown-editor"
                       onChange={(event) => handleBlueprintFileChange("memoryMd", event.target.value)}
@@ -1836,7 +1985,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                     {isWizardMode ? (
                       <>
                         <button className="button-ghost" onClick={handleDetailsPrevious} type="button">
-                          上一步
+                          {t(uiLanguage, "button.previous")}
                         </button>
                         <button
                           className="button-primary"
@@ -1844,7 +1993,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                           onClick={handleDetailsNext}
                           type="button"
                         >
-                          {isSavingBlueprintFiles ? "保存中..." : "下一步"}
+                          {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.next")}
                         </button>
                       </>
                     ) : (
@@ -1854,24 +2003,22 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                         onClick={handleSaveBlueprintFiles}
                         type="button"
                       >
-                        {isSavingBlueprintFiles ? "保存中..." : "保存 Markdown 文件"}
+                        {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.saveMarkdown")}
                       </button>
                     )}
                   </div>
                   <div className="workspace-feedback">
-                    {blueprintFilesStatus || "这里的四个 Markdown 文件可以直接手动编辑。保存后会覆盖角色包里的最终内容。"}
+                    {blueprintFilesStatus || t(uiLanguage, "detail.markdownHint")}
                     <br />
-                    {selected.workspacePath ? `当前 workspace：${selected.workspacePath}` : workspaceStatus || "完成第一步后会自动创建并同步 workspace。"}
+                    {selected.workspacePath ? `${t(uiLanguage, "detail.currentWorkspace")}${selected.workspacePath}` : workspaceStatus || t(uiLanguage, "detail.workspaceAfterProfile")}
                   </div>
                 </>
               ) : (
-                <div className="empty-state">
-                  这个角色还没有生成角色信息。先回到上一步，保存基础信息并生成角色详情。
-                </div>
+                <div className="empty-state">{t(uiLanguage, "empty.noBlueprint")}</div>
               )}
             </div>
           ) : (
-            <div className="empty-state">还没有选中的角色。</div>
+            <div className="empty-state">{t(uiLanguage, "empty.noSelectedCharacter")}</div>
           )}
         </div>
       </section>
@@ -1883,16 +2030,34 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
       <section className="hero">
         <div className="hero-grid">
           <div>
-            <h1>OpenClaw Friends</h1>
-            <p>
-              这一版把“直接填 MBTI + 粗糙关系标签”改成了“更一般的性格问题 + 世界观 + 好感路线”。
-              目标不是做心理测试，而是给角色和关系一个更自然的起点。
-            </p>
+            <div className="hero-toolbar">
+              <div className="hero-language-picker">
+                <label htmlFor="ui-language">{t(uiLanguage, "language.ui")}</label>
+                <select
+                  id="ui-language"
+                  onChange={(event) =>
+                    setUserProfile((current) => ({
+                      ...current,
+                      language: event.target.value as AppLanguage
+                    }))
+                  }
+                  value={userProfile.language}
+                >
+                  {APP_LANGUAGES.map((language) => (
+                    <option key={language} value={language}>
+                      {getLanguageLabel(uiLanguage, language)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <h1>{t(uiLanguage, "hero.title")}</h1>
+            <p>{t(uiLanguage, "hero.description")}</p>
             <div className="badge-row">
-              <span className="badge">世界观设定</span>
-              <span className="badge">MBTI 自动推测</span>
-              <span className="badge">多选关系偏好</span>
-              <span className="badge">好感值路线</span>
+              <span className="badge">{t(uiLanguage, "badge.world")}</span>
+              <span className="badge">{t(uiLanguage, "badge.mbti")}</span>
+              <span className="badge">{t(uiLanguage, "badge.relationship")}</span>
+              <span className="badge">{t(uiLanguage, "badge.affection")}</span>
               <a
                 className="badge discord-badge"
                 href="https://discord.gg/Y5EExWtP"
@@ -1902,15 +2067,13 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                 <svg width="20" height="16" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.3 37.3 0 0025.4.3a.2.2 0 00-.2-.1 58.4 58.4 0 00-14.7 4.6.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.2a58.9 58.9 0 0017.7 9 .2.2 0 00.3-.1 42.1 42.1 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.7.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.7 58.7 0 0070.7 45.7v-.2c1.4-15.2-2.4-28.4-10-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.3 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1z" fill="currentColor"/>
                 </svg>
-                官方 Discord
+                {t(uiLanguage, "badge.discord")}
               </a>
             </div>
           </div>
           <div className="hint-box">
-            <strong>为什么改成这种问法：</strong>
-            <p>
-              不是每个人都知道自己的 MBTI，但大多数人知道自己是更外向还是更慢热、喜欢被直接沟通还是被温柔接住。把问题拆开以后，角色和关系都更容易落地。
-            </p>
+            <strong>{t(uiLanguage, "hero.why")}</strong>
+            <p>{t(uiLanguage, "hero.whyBody")}</p>
           </div>
         </div>
       </section>
@@ -1925,11 +2088,15 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
           <div className="editor-page-header">
             {characters.length ? (
               <button className="button-ghost" onClick={goBackToBrowse} type="button">
-                返回
+                {t(uiLanguage, "button.back")}
               </button>
             ) : null}
             <div>
-              <strong>{selected ? `正在编辑：${selected.name}` : "正在创建新角色"}</strong>
+              <strong>
+                {selected
+                  ? t(uiLanguage, "editor.current", { name: selected.name })
+                  : t(uiLanguage, "editor.creating")}
+              </strong>
               <div className="status">{currentEditorStepMeta.title} · {currentEditorStepMeta.description}</div>
             </div>
           </div>
@@ -1937,12 +2104,12 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
             <div className="panel-inner stack">
               <div className="panel-title">
                 <div>
-                  <h3>设置流程</h3>
-                  <p>按顺序完成角色创建、详情修订、Discord 和 TuQu 配置。</p>
+                  <h3>{t(uiLanguage, "stepper.title")}</h3>
+                  <p>{t(uiLanguage, "stepper.description")}</p>
                 </div>
               </div>
               <div className="stepper">
-                {EDITOR_STEPS.map((step, index) => (
+                {editorSteps.map((step, index) => (
                   <button
                     className="stepper-item"
                     data-active={step.key === editorStep}
@@ -1974,43 +2141,39 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h2>Discord Bots</h2>
-              <p>
-                在设置流程里保存 Discord 配置后，OpenClaw 会自动接管所有角色 bot 的运行和 @mention 路由。
-                <br />
-                下方的本地启动仅用于调试，直接在 Designer 进程内运行 bot，不经过 OpenClaw。
-              </p>
+              <h2>{t(uiLanguage, "runtime.title")}</h2>
+              <p>{t(uiLanguage, "runtime.description")}</p>
             </div>
           </div>
 
           <div className="workspace-feedback">
             {savedDiscordAccounts.length
-              ? savedDiscordAccounts.map((account) => `${account.characterName ?? account.accountId}: 已注册`).join(" | ")
-              : "还没有保存任何角色级 Discord 账号。先进入编辑流程完成 Discord 设置。"}
+              ? savedDiscordAccounts.map((account) => `${account.characterName ?? account.accountId}: ${t(uiLanguage, "runtime.registered")}`).join(" | ")
+              : t(uiLanguage, "runtime.noneSaved")}
           </div>
 
           <details>
-            <summary>本地调试：在 Designer 进程内启动 Bots</summary>
+            <summary>{t(uiLanguage, "runtime.localDebug")}</summary>
             <div className="actions" style={{ marginTop: "0.75rem" }}>
               {discordRuntimeStatus.running ? (
                 <button className="button-ghost" disabled={isStoppingDiscordRuntime} onClick={handleStopDiscordRuntime} type="button">
-                  {isStoppingDiscordRuntime ? "停止中..." : "停止调试 Bots"}
+                  {isStoppingDiscordRuntime ? t(uiLanguage, "runtime.stopping") : t(uiLanguage, "runtime.stop")}
                 </button>
               ) : (
                 <button className="button-ghost" disabled={isStartingDiscordRuntime} onClick={handleStartDiscordRuntime} type="button">
-                  {isStartingDiscordRuntime ? "启动中..." : "启动调试 Bots"}
+                  {isStartingDiscordRuntime ? t(uiLanguage, "runtime.starting") : t(uiLanguage, "runtime.start")}
                 </button>
               )}
             </div>
             <div className="workspace-feedback">
-              {discordRuntimeStatus.running ? "至少有一个 Discord bot 正在本地运行。" : "当前没有正在本地运行的 Discord bot。"}
+              {discordRuntimeStatus.running ? t(uiLanguage, "runtime.running") : t(uiLanguage, "runtime.notRunning")}
               <br />
               {discordRuntimeStatus.accounts.length
                 ? discordRuntimeStatus.accounts
                     .map((account) =>
                       account.running
-                        ? `${account.characterName ?? account.accountId}: ${account.botTag ?? account.botUserId ?? "已登录"}`
-                        : `${account.characterName ?? account.accountId}: 未运行`
+                        ? `${account.characterName ?? account.accountId}: ${account.botTag ?? account.botUserId ?? t(uiLanguage, "runtime.loggedIn")}`
+                        : `${account.characterName ?? account.accountId}: ${t(uiLanguage, "runtime.stopped")}`
                     )
                     .join(" | ")
                 : ""}
@@ -2024,23 +2187,23 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
         <div className="workspace-picker-overlay" onClick={() => setShowWorkspacePicker(false)}>
           <div className="workspace-picker-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="workspace-picker-header">
-              <h3>同步现有 Workspace</h3>
+              <h3>{t(uiLanguage, "workspacePicker.title")}</h3>
               <button
                 className="button-ghost"
                 onClick={() => setShowWorkspacePicker(false)}
                 type="button"
               >
-                关闭
+                {t(uiLanguage, "button.close")}
               </button>
             </div>
             <p className="workspace-picker-desc">
-              选择一个已有的 workspace 导入为设计器角色。导入后可以编辑并补全缺失的配置，然后同步回 workspace。
+              {t(uiLanguage, "workspacePicker.description")}
             </p>
             {isLoadingWorkspaces ? (
-              <div className="workspace-picker-loading">正在扫描 workspace 目录...</div>
+              <div className="workspace-picker-loading">{t(uiLanguage, "workspacePicker.loading")}</div>
             ) : availableWorkspaces.length === 0 ? (
               <div className="workspace-picker-empty">
-                没有找到可导入的 workspace。已被设计器管理的 workspace 不会重复显示。
+                {t(uiLanguage, "workspacePicker.empty")}
               </div>
             ) : (
               <div className="workspace-picker-list">
@@ -2056,7 +2219,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                         {ws.hasMemoryMd && <span className="pill">MEMORY.md</span>}
                         {ws.hasDiscordLink && <span className="pill warm">Discord</span>}
                         {ws.hasTuquConfig && <span className="pill warm">TuQu</span>}
-                        {ws.hasCharacterRecord && <span className="pill">完整记录</span>}
+                        {ws.hasCharacterRecord && <span className="pill">{t(uiLanguage, "workspacePicker.fullRecord")}</span>}
                       </div>
                     </div>
                     <button
@@ -2065,7 +2228,7 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
                       onClick={() => handleImportWorkspace(ws.workspacePath)}
                       type="button"
                     >
-                      {isImportingWorkspace ? "导入中..." : "导入"}
+                      {isImportingWorkspace ? t(uiLanguage, "workspacePicker.importing") : t(uiLanguage, "workspacePicker.import")}
                     </button>
                   </div>
                 ))}
@@ -2080,11 +2243,13 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
 
 function ChoiceField({
   label,
+  language,
   options,
   field,
   onChange
 }: {
   label: string;
+  language: AppLanguage;
   options: readonly string[];
   field: SingleChoiceInput;
   onChange: (field: keyof SingleChoiceInput, value: string) => void;
@@ -2095,13 +2260,13 @@ function ChoiceField({
       <select onChange={(event) => onChange("selected", event.target.value)} value={field.selected}>
         {options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {translateOption(language, option)}
           </option>
         ))}
       </select>
       <input
         onChange={(event) => onChange("custom", event.target.value)}
-        placeholder="其他：如果选项不够，直接补充"
+        placeholder={t(language, "placeholder.other")}
         value={field.custom}
       />
     </div>
@@ -2110,12 +2275,14 @@ function ChoiceField({
 
 function CheckboxField({
   label,
+  language,
   options,
   field,
   onToggle,
   onCustomChange
 }: {
   label: string;
+  language: AppLanguage;
   options: readonly string[];
   field: MultiChoiceInput;
   onToggle: (value: string) => void;
@@ -2132,32 +2299,25 @@ function CheckboxField({
               onChange={() => onToggle(option)}
               type="checkbox"
             />
-            <span>{option}</span>
+            <span>{translateOption(language, option)}</span>
           </label>
         ))}
       </div>
       <input
         onChange={(event) => onCustomChange(event.target.value)}
-        placeholder="其他：自己补充想要的相处特征"
+        placeholder={t(language, "placeholder.otherTraits")}
         value={field.custom}
       />
     </div>
   );
 }
 
-function axisLabel(key: keyof typeof PERSONALITY_AXIS_OPTIONS, isCharacter: boolean) {
-  switch (key) {
-    case "socialEnergy":
-      return isCharacter ? "ta 累了更需要" : "你累了更需要";
-    case "informationFocus":
-      return isCharacter ? "ta 更关注什么" : "你更关注什么";
-    case "decisionStyle":
-      return isCharacter ? "ta 做判断时更先看什么" : "你做判断时更先看什么";
-    case "lifestylePace":
-      return isCharacter ? "ta 的生活节奏" : "你的生活节奏";
-    default:
-      return key;
-  }
+function axisLabel(
+  key: keyof typeof PERSONALITY_AXIS_OPTIONS,
+  isCharacter: boolean,
+  language: AppLanguage
+) {
+  return t(language, `axis.${isCharacter ? "character" : "user"}.${key}`);
 }
 
 function draftFromCharacter(character: CharacterRecord): DraftCharacterInput {
@@ -2171,6 +2331,7 @@ function draftFromCharacter(character: CharacterRecord): DraftCharacterInput {
     concept: character.concept,
     mbti: character.mbti,
     personality: { ...character.personality },
+    language: character.language,
     photos: [...character.photos],
     preset: character.preset ?? "Custom"
   };

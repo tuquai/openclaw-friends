@@ -6,7 +6,8 @@ import { listCharacters } from "@/lib/data";
 import { listDiscordRuntimeAccounts, readDiscordRuntimeAccount } from "@/lib/discord-config";
 import { generateDiscordReply, generateInCharacterError, generatePhotoScene, generateRechargeDecision } from "@/lib/openai";
 import { generateCharacterImage, generateFreestyleImage, TuquApiError, listRechargePlans, createWechatPayment, createStripePayment } from "@/lib/tuqu";
-import { CharacterRecord, DiscordRuntimeAccountStatus, DiscordRuntimeStatus } from "@/lib/types";
+import { AppLanguage, CharacterRecord, DiscordRuntimeAccountStatus, DiscordRuntimeStatus } from "@/lib/types";
+import { instructionLanguageName } from "@/lib/i18n";
 
 type ReconnectState = {
   consecutiveErrors: number;
@@ -268,11 +269,15 @@ async function readOpenClawManagedAccountIds() {
 }
 
 function isPhotoRequest(message: string) {
-  return /自拍|拍.?照|写真|证件照|人像照|照片|[生出发].?图|改图|头像/u.test(message);
+  return /自拍|拍.?照|写真|证件照|人像照|照片|[生出发].?图|改图|头像|selfie|photo|portrait|image|picture|generate.*image|edit.*image|自撮り|写真|画像/u.test(
+    message
+  );
 }
 
 function wantsUserFace(message: string) {
-  return /我的脸|用我.*脸|用我的照片|我本人|我的正脸|我的自拍/u.test(message);
+  return /我的脸|用我.*脸|用我的照片|我本人|我的正脸|我的自拍|my face|use my photo|use my face|me in the photo|私の顔|私の写真/u.test(
+    message
+  );
 }
 
 function buildTuquGuidance(character: CharacterRecord) {
@@ -281,18 +286,79 @@ function buildTuquGuidance(character: CharacterRecord) {
   const hasCharacterId = Boolean(character.tuquConfig?.characterId?.trim());
 
   if (!hasServiceKey) {
-    return `\u8981\u8ba9\u6211\u62e5\u6709\u62cd\u7167\u548c\u751f\u6210\u56fe\u7247\u7684\u80fd\u529b\uff0c\u4f60\u9700\u8981\u5148\u6253\u5f00\u8fd9\u4e2a\u5b8c\u6574\u94fe\u63a5\u6ce8\u518c\u5e76\u751f\u6210 TUQU Service Key\uff1a${registrationUrl}\u3002\u6ce8\u518c\u597d\u540e\u628a Service Key \u76f4\u63a5\u53d1\u7ed9\u6211\uff0c\u6211\u4f1a\u5148\u7528\u6211\u81ea\u5df1\u7684 profile \u56fe\u7247\u548c\u89d2\u8272\u8d44\u6599\u521b\u5efa\u6211\u7684 TUQU \u89d2\u8272\uff0c\u518d\u7ee7\u7eed\u5e2e\u4f60\u51fa\u56fe\u3002`;
+    if (character.language === "en") {
+      return `If you want me to take photos or generate images, open this full link first and create a TUQU Service Key: ${registrationUrl}. Once you have it, either send the Service Key to me here or configure it in the UI's TuQu settings section, and I’ll create my own TUQU character from my profile image and role data before we keep going.`;
+    }
+    if (character.language === "ja") {
+      return `私に写真生成をさせたいなら、まずこの完全なリンクを開いて TUQU Service Key を作ってね: ${registrationUrl}。作れたらここで Service Key を送ってくれるか、UI の TuQu 設定欄で設定してくれれば、先に私自身のプロフィール画像とキャラ情報から TUQU キャラを作って、そのあと続けて画像を出せるよ。`;
+    }
+    return `要让我拥有拍照和生成图片的能力，你需要先打开这个完整链接注册并生成 TUQU Service Key：${registrationUrl}。注册好后，你可以直接把 Service Key 发给我，或者在 UI 的 TuQu 配置区域进行配置；我会先用我自己的 profile 图片和角色资料创建我的 TUQU 角色，再继续帮你出图。`;
   }
 
   if (!hasCharacterId) {
-    return "\u6211\u5df2\u7ecf\u6709 TUQU Service Key \u4e86\uff0c\u4f46\u8fd8\u6ca1\u5148\u628a\u6211\u81ea\u5df1\u7684 TUQU \u89d2\u8272\u5efa\u8d77\u6765\u3002\u6211\u9700\u8981\u5148\u7528\u6211\u81ea\u5df1\u7684 profile \u56fe\u7247\u548c\u89d2\u8272\u8d44\u6599\u521b\u5efa\u89d2\u8272\uff0c\u7136\u540e\u624d\u80fd\u7ee7\u7eed\u7ed9\u4f60\u751f\u6210\u81ea\u62cd\u6216\u5199\u771f\u3002";
+    if (character.language === "en") {
+      return "I already have the TUQU Service Key, but I still need to create my own TUQU character first using my profile image and role data before I can keep generating selfies or portraits for you.";
+    }
+    if (character.language === "ja") {
+      return "TUQU Service Key はもうあるけど、まだ私自身の TUQU キャラを先に作っていないの。プロフィール画像とキャラ情報から私の TUQU キャラを作ってからでないと、自撮りやポートレートは続けて生成できないよ。";
+    }
+    return "我已经有 TUQU Service Key 了，但还没先把我自己的 TUQU 角色建起来。我需要先用我自己的 profile 图片和角色资料创建角色，然后才能继续给你生成自拍或写真。";
   }
 
   return null;
 }
 
 function buildPhotoStyleInstruction(character: CharacterRecord) {
-  return `${character.name}\u5728\u5904\u7406\u62cd\u7167\u6216\u81ea\u62cd\u8bf7\u6c42\u65f6\uff0c\u5e94\u8be5\u76f4\u63a5\u6839\u636e\u81ea\u5df1\u7684\u4e16\u754c\u89c2\u3001\u6c14\u8d28\u3001\u804c\u4e1a\u3001\u8bf4\u8bdd\u98ce\u683c\u548c\u5f53\u524d\u5173\u7cfb\u72b6\u6001\uff0c\u63a8\u6f14\u51fa\u4e00\u5f20\u6700\u9002\u5408\u7684\u7167\u7247\uff0c\u4e0d\u8981\u4e00\u6b21\u7ed9\u7528\u6237\u5217\u51fa\u4e00\u4e32\u9009\u9879\u3001\u83dc\u5355\u6216\u98ce\u683c\u6e05\u5355\u3002\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u201c\u7ed9\u6211\u51e0\u4e2a\u9009\u9879\u201d\uff0c\u5426\u5219\u76f4\u63a5\u51b3\u5b9a\u4e00\u4e2a\u6700\u5408\u9002\u7684\u62cd\u6444\u65b9\u6848\u5373\u53ef\u3002`;
+  const targetLanguage = instructionLanguageName(character.language);
+  return `${character.name} should handle photo or selfie requests decisively based on their own world setting, vibe, job, speaking style, and current relationship state. Do not offer a big menu of choices unless the user explicitly asks for options. Pick the single most fitting photo direction and keep the actual reply in ${targetLanguage}.`;
+}
+
+function runtimeFallback(language: AppLanguage, key: "photoBalance" | "photoFailed" | "rechargePlans" | "paymentFailed" | "replyFailed") {
+  switch (language) {
+    case "en":
+      switch (key) {
+        case "photoBalance":
+          return "Looks like I can't take that photo right now... the image service is out of balance, so top it up first and then come back to me.";
+        case "photoFailed":
+          return "The photo didn't come through this time. Something glitched a bit, so try me again in a moment.";
+        case "rechargePlans":
+          return "I couldn't load the recharge plans just now. Try again in a moment.";
+        case "paymentFailed":
+          return "(The payment link didn't generate successfully. Try again in a moment.)";
+        case "replyFailed":
+        default:
+          return "I glitched for a second just now. Try me one more time in a moment.";
+      }
+    case "ja":
+      switch (key) {
+        case "photoBalance":
+          return "今はその写真を撮れなさそう… 画像生成の残高が足りないから、先にチャージしてからまた来てね。";
+        case "photoFailed":
+          return "今回はうまく撮れなかったみたい。ちょっと不具合っぽいから、少ししてからもう一回試して。";
+        case "rechargePlans":
+          return "今ちょっとチャージプランを読み込めなかった。また少ししてから試してみて。";
+        case "paymentFailed":
+          return "（支払いリンクの生成に失敗したみたい。少ししてからもう一回試して。）";
+        case "replyFailed":
+        default:
+          return "さっき少し途切れちゃった。少ししてからもう一回話しかけて。";
+      }
+    case "zh":
+    default:
+      switch (key) {
+        case "photoBalance":
+          return "拍不了了… 图片生成服务余额不够了，先去充个值再来找我拍吧！";
+        case "photoFailed":
+          return "图片没拍成，出了点状况，稍后再试试看。";
+        case "rechargePlans":
+          return "充值方案没加载出来，稍后再试试～";
+        case "paymentFailed":
+          return "（支付生成失败了，稍后再试）";
+        case "replyFailed":
+        default:
+          return "我刚刚掉线了一下，稍后再试一次。";
+      }
+  }
 }
 
 type RoleContext = {
@@ -307,20 +373,21 @@ type RoleContext = {
 function describeTuquError(error: unknown, character?: CharacterRecord): string {
   if (error instanceof TuquApiError) {
     if (error.code === "INSUFFICIENT_BALANCE") {
-      const balanceHint = typeof error.remainingBalance === "number" ? `（当前余额: ${error.remainingBalance}）` : "";
+      const balanceHint =
+        typeof error.remainingBalance === "number" ? ` Current balance: ${error.remainingBalance}.` : "";
       return [
-        `图片生成服务余额不足${balanceHint}，需要帮用户充值才能继续生成图片。`,
-        "告诉用户你可以帮忙查看充值方案并直接生成付款二维码或付款链接。",
-        "问用户要用微信扫码还是信用卡（Stripe），然后你来调用充值API帮他们搞定。",
-        "语气轻松友好，不要让用户觉得尴尬。不要只甩一个登录链接让用户自己去操作。"
+        `The image generation service is out of balance.${balanceHint}`,
+        "Tell the user you can help with recharging by showing plans and generating a QR code or payment link directly.",
+        "Ask whether they want WeChat or credit card / Stripe, then handle the recharge flow for them.",
+        "Keep the tone light and helpful. Do not dump a login link and make them do everything alone."
       ].join(" ");
     }
     if (error.code === "GENERATION_FAILED") {
-      return "图片生成过程出了点意外，可能是暂时性故障。让用户稍后再试一次。";
+      return "The image generation step hit a temporary problem. Let the user know and ask them to try again shortly.";
     }
-    return `图片生成时遇到了问题（${error.code}）。让用户知道出了点小状况，稍后重试。`;
+    return `Image generation failed with code ${error.code}. Tell the user something small went wrong and ask them to retry shortly.`;
   }
-  return "图片生成时遇到了未知问题。告诉用户出了点状况，稍后再试。";
+  return "Image generation hit an unknown problem. Tell the user something went wrong and ask them to try again shortly.";
 }
 
 async function replyWithInCharacterError(
@@ -333,6 +400,7 @@ async function replyWithInCharacterError(
   try {
     const reply = await generateInCharacterError({
       characterName: character.name,
+      language: character.language,
       identityMd: context.identityMd,
       soulMd: context.soulMd,
       situation,
@@ -342,9 +410,9 @@ async function replyWithInCharacterError(
   } catch (fallbackError) {
     console.error("Failed to generate in-character error reply:", fallbackError);
     if (error instanceof TuquApiError && error.code === "INSUFFICIENT_BALANCE") {
-      await message.reply("\u62cd\u4e0d\u4e86\u4e86\u2026\u56fe\u7247\u751f\u6210\u670d\u52a1\u4f59\u989d\u4e0d\u591f\u4e86\uff0c\u5148\u53bb\u5145\u4e2a\u503c\u518d\u6765\u627e\u6211\u62cd\u5427\uff01");
+      await message.reply(runtimeFallback(character.language, "photoBalance"));
     } else {
-      await message.reply("\u56fe\u7247\u6ca1\u62cd\u6210\uff0c\u51fa\u4e86\u70b9\u72b6\u51b5\uff0c\u7a0d\u540e\u518d\u8bd5\u8bd5\u770b\u3002");
+      await message.reply(runtimeFallback(character.language, "photoFailed"));
     }
   }
 }
@@ -359,6 +427,7 @@ async function handlePhotoRequest(
 
   const scene = await generatePhotoScene({
     characterName: character.name,
+    language: character.language,
     ...context,
     message: userText,
     username: message.author.username,
@@ -404,7 +473,7 @@ async function handlePhotoRequest(
 }
 
 function isRechargeRequest(message: string) {
-  return /充值|余额|买点|recharge|top.?up|付[费款]|续费/u.test(message);
+  return /充值|余额|买点|recharge|top.?up|付[费款]|续费|charge|tokens|balance|チャージ|残高|課金/u.test(message);
 }
 
 function decodeQrCodeBuffer(dataUri: string): Buffer {
@@ -425,12 +494,13 @@ async function handleRechargeRequest(
     plans = await listRechargePlans(serviceKey);
   } catch (err) {
     console.error("[recharge] failed to list plans:", err);
-    await message.reply("充值方案没加载出来，稍后再试试～");
+    await message.reply(runtimeFallback(character.language, "rechargePlans"));
     return;
   }
 
   const decision = await generateRechargeDecision({
     characterName: character.name,
+    language: character.language,
     identityMd: context.identityMd,
     soulMd: context.soulMd,
     plans,
@@ -454,7 +524,7 @@ async function handleRechargeRequest(
       }
     } catch (err) {
       console.error("[recharge] wechat payment failed:", err);
-      await message.reply(`${decision.chatReply}\n\n（支付生成失败了，稍后再试）`);
+      await message.reply(`${decision.chatReply}\n\n${runtimeFallback(character.language, "paymentFailed")}`);
     }
     return;
   }
@@ -476,7 +546,7 @@ async function handleRechargeRequest(
       }
     } catch (err) {
       console.error("[recharge] stripe payment failed:", err);
-      await message.reply(`${decision.chatReply}\n\n（支付生成失败了，稍后再试）`);
+      await message.reply(`${decision.chatReply}\n\n${runtimeFallback(character.language, "paymentFailed")}`);
     }
     return;
   }
@@ -560,6 +630,7 @@ async function handleMessage(message: Message) {
 
     const reply = await generateDiscordReply({
       characterName: character.name,
+      language: character.language,
       ...context,
       photoStyleInstruction: buildPhotoStyleInstruction(character),
       tuquRegistrationUrl: character.tuquConfig?.registrationUrl,
@@ -585,7 +656,7 @@ async function handleMessage(message: Message) {
     await appendConversationMemory(character, message.author.username, trimmed, reply);
   } catch (error) {
     console.error("Discord reply failed:", error);
-    await message.reply("\u6211\u521a\u521a\u6389\u7ebf\u4e86\u4e00\u4e0b\uff0c\u7a0d\u540e\u518d\u8bd5\u4e00\u6b21\u3002");
+    await message.reply(runtimeFallback(character.language, "replyFailed"));
   }
 }
 

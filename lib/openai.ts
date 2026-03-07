@@ -1,6 +1,7 @@
-import { BlueprintPackage, DraftCharacterInput, QuestionnaireInput } from "@/lib/types";
+import { AppLanguage, BlueprintPackage, DraftCharacterInput, QuestionnaireInput } from "@/lib/types";
 import { MBTI_PRESETS } from "@/lib/mbti";
 import type { RechargePlan } from "@/lib/tuqu";
+import { instructionLanguageName, translateOption } from "@/lib/i18n";
 
 const schema = {
   name: "blueprint_package",
@@ -105,7 +106,8 @@ type ComposePayload = {
   questionnaire: QuestionnaireInput;
 };
 
-function buildSystemPrompt() {
+function buildSystemPrompt(language: AppLanguage) {
+  const targetLanguage = instructionLanguageName(language);
   return [
     "You design believable OpenClaw characters.",
     "Transform a user draft into a blueprint package that can be written directly into an OpenClaw workspace.",
@@ -116,7 +118,7 @@ function buildSystemPrompt() {
     "Make the relationship feel inferred from both sides instead of generic wish fulfillment.",
     "Affection can start low or high, but the output must explain why and how it grows.",
     "Do not write meta phrases like persona, prompt, setup, role, or character setting.",
-    "Write all content in Chinese except unavoidable file headings such as IDENTITY.md and SOUL.md.",
+    `Write all content in ${targetLanguage}. The markdown files themselves remain IDENTITY.md, SOUL.md, USER.md, and MEMORY.md.`,
     "The writing style of workspace files should feel lived-in, opinionated, and practical, similar to a well-maintained personal workspace rather than product copy.",
     "The files field must contain final text ready to be saved as markdown files.",
     "Do not output markdown code fences or explanations outside the JSON schema."
@@ -126,20 +128,73 @@ function buildSystemPrompt() {
 function buildUserPrompt(payload: ComposePayload) {
   const preset = MBTI_PRESETS[payload.character.mbti] ?? null;
   const userPreset = MBTI_PRESETS[payload.questionnaire.userMbti] ?? null;
+  const targetLanguage = instructionLanguageName(payload.character.language);
+  const localizedCharacterDraft = {
+    ...payload.character,
+    personality: {
+      ...payload.character.personality,
+      socialEnergy: translateOption(payload.character.language, payload.character.personality.socialEnergy),
+      informationFocus: translateOption(payload.character.language, payload.character.personality.informationFocus),
+      decisionStyle: translateOption(payload.character.language, payload.character.personality.decisionStyle),
+      lifestylePace: translateOption(payload.character.language, payload.character.personality.lifestylePace)
+    }
+  };
+  const localizedUserProfile = {
+    ...payload.questionnaire,
+    userPersonality: {
+      ...payload.questionnaire.userPersonality,
+      socialEnergy: translateOption(payload.character.language, payload.questionnaire.userPersonality.socialEnergy),
+      informationFocus: translateOption(
+        payload.character.language,
+        payload.questionnaire.userPersonality.informationFocus
+      ),
+      decisionStyle: translateOption(payload.character.language, payload.questionnaire.userPersonality.decisionStyle),
+      lifestylePace: translateOption(payload.character.language, payload.questionnaire.userPersonality.lifestylePace)
+    },
+    lifeStage: {
+      ...payload.questionnaire.lifeStage,
+      selected: translateOption(payload.character.language, payload.questionnaire.lifeStage.selected)
+    },
+    communicationPreference: {
+      ...payload.questionnaire.communicationPreference,
+      selected: translateOption(payload.character.language, payload.questionnaire.communicationPreference.selected)
+    },
+    desiredBond: {
+      ...payload.questionnaire.desiredBond,
+      selected: translateOption(payload.character.language, payload.questionnaire.desiredBond.selected)
+    },
+    treatmentPreference: {
+      ...payload.questionnaire.treatmentPreference,
+      selected: payload.questionnaire.treatmentPreference.selected.map((item) =>
+        translateOption(payload.character.language, item)
+      )
+    },
+    specialTraits: {
+      ...payload.questionnaire.specialTraits,
+      selected: payload.questionnaire.specialTraits.selected.map((item) =>
+        translateOption(payload.character.language, item)
+      )
+    },
+    affectionPlan: {
+      ...payload.questionnaire.affectionPlan,
+      growthRoute: translateOption(payload.character.language, payload.questionnaire.affectionPlan.growthRoute)
+    }
+  };
 
   return JSON.stringify(
     {
       goal: "Generate an initial but believable role package for a newly created OpenClaw character.",
-      characterDraft: payload.character,
+      characterDraft: localizedCharacterDraft,
+      outputLanguage: targetLanguage,
       characterMbtiPreset: preset,
-      userProfile: payload.questionnaire,
+      userProfile: localizedUserProfile,
       userMbtiPreset: userPreset,
       requirements: [
         "Assume the user is not willing to fill a giant setting bible, but still wants enough structure to make the character coherent.",
         "Use the draft and questionnaire to infer likely speaking style, emotional tendencies, and a relationship story that feels specific.",
         "Character.worldSetting must meaningfully shape tone, topic choices, and relationship assumptions.",
         "Relationship.dynamic and backstory should mention how they got close, why this pairing works, and a little friction so it feels real.",
-        "relationship.affectionBaseline should explain the starting favorability level in plain Chinese.",
+        `relationship.affectionBaseline should explain the starting favorability level in plain ${targetLanguage}.`,
         "relationship.affectionGrowthPath should give 3 to 5 concrete progression beats that could help the user practice social interaction.",
         "The user's treatmentPreference and specialTraits are preferences, not commands; do not make the role one-note or fetishized.",
         "Boundaries should keep the role usable, age-appropriate, and non-cringey.",
@@ -192,63 +247,160 @@ function appendSection(markdown: string, heading: string, lines: string[]) {
   return `${trimmed}\n\n${block}\n`;
 }
 
-function ensureBlueprintDetailsInFiles(blueprint: BlueprintPackage, questionnaire: QuestionnaireInput) {
+function ensureBlueprintDetailsInFiles(
+  blueprint: BlueprintPackage,
+  questionnaire: QuestionnaireInput,
+  language: AppLanguage
+) {
+  const localized =
+    language === "en"
+      ? {
+          characterAnchors: "Character Anchors",
+          oneLiner: "One-liner",
+          coreTrait: "Core trait",
+          speakingStyle: "Speaking style",
+          relationshipAnchors: "Relationship Anchors",
+          currentRelationship: "Current relationship",
+          relationshipStory: "Relationship story",
+          affectionBaseline: "Affection baseline",
+          howToAddress: "How to address the user",
+          addressingStyle: "Addressing style",
+          affectionGrowthPath: "Affection growth path",
+          addressingHeading: "Addressing",
+          whatToCallThem: "What to call them",
+          relationshipBlueprintHeading: "Relationship Blueprint",
+          memorySummary: "Summary",
+          memoryDynamic: "Dynamic",
+          memoryBackstory: "Backstory",
+          memoryAffectionBaseline: "Affection baseline",
+          memoryAddressingStyle: "Addressing style",
+          memoryGrowthBeat: "Growth beat",
+          boundariesLines: [
+            "- Privacy is a hard line. No exceptions.",
+            "- When in doubt, ask before acting externally.",
+            "- Never send half-baked replies to messaging surfaces.",
+            "- You are not the user's spokesperson; be careful in group chats."
+          ],
+          userDefault: "User"
+        }
+      : language === "ja"
+        ? {
+            characterAnchors: "キャラのアンカー",
+            oneLiner: "一言要約",
+            coreTrait: "核となる特徴",
+            speakingStyle: "話し方",
+            relationshipAnchors: "関係のアンカー",
+            currentRelationship: "現在の関係",
+            relationshipStory: "関係の背景",
+            affectionBaseline: "初期好感度",
+            howToAddress: "ユーザーの呼び方",
+            addressingStyle: "呼び方の方針",
+            affectionGrowthPath: "好感度の上がり方",
+            addressingHeading: "呼び方",
+            whatToCallThem: "何と呼ぶか",
+            relationshipBlueprintHeading: "関係のメモ",
+            memorySummary: "要約",
+            memoryDynamic: "関係の動き",
+            memoryBackstory: "背景",
+            memoryAffectionBaseline: "初期好感度",
+            memoryAddressingStyle: "呼び方の方針",
+            memoryGrowthBeat: "進展ポイント",
+            boundariesLines: [
+              "- プライバシーは越えてはいけない一線。",
+              "- 迷ったら外部へ動く前に確認すること。",
+              "- 途中段階の返答をそのまま送らないこと。",
+              "- ユーザーの代弁者ではない。グループでは慎重に。"
+            ],
+            userDefault: "ユーザー"
+          }
+        : {
+            characterAnchors: "角色锚点",
+            oneLiner: "一句话摘要",
+            coreTrait: "核心特质",
+            speakingStyle: "说话方式",
+            relationshipAnchors: "关系锚点",
+            currentRelationship: "当前关系",
+            relationshipStory: "关系叙事",
+            affectionBaseline: "初始好感",
+            howToAddress: "如何称呼用户",
+            addressingStyle: "称呼风格",
+            affectionGrowthPath: "好感提升路线",
+            addressingHeading: "称呼",
+            whatToCallThem: "如何称呼对方",
+            relationshipBlueprintHeading: "关系蓝图",
+            memorySummary: "摘要",
+            memoryDynamic: "关系动态",
+            memoryBackstory: "关系叙事",
+            memoryAffectionBaseline: "初始好感",
+            memoryAddressingStyle: "称呼风格",
+            memoryGrowthBeat: "推进节点",
+            boundariesLines: [
+              "- **隐私是红线。没有例外。** Private things stay private. Period.",
+              "- **拿不准的时候，先问再动。** When in doubt, ask before acting externally.",
+              "- **不要在聊天里发半成品回复。** Never send half-baked replies to messaging surfaces.",
+              "- **你不是用户的代言人，群聊里要小心。** You're not the user's voice; be careful in group chats."
+            ],
+            userDefault: "用户"
+          };
   const oneLiner = blueprint.summary.oneLiner.trim();
   const coreTraits = blueprint.character.coreTraits.filter(Boolean);
   const speakingStyle = blueprint.character.speakingStyle.filter(Boolean);
   const relationshipLines = [
-    `- 当前关系：${blueprint.relationship.dynamic}`,
-    `- 关系叙事：${blueprint.relationship.backstory}`,
-    `- 初始好感：${blueprint.relationship.affectionBaseline}`,
-    `- 如何称呼用户：${questionnaire.userNameForRole || blueprint.relationship.userAddressingStyle}`,
-    `- 称呼风格：${blueprint.relationship.userAddressingStyle}`
+    `- ${localized.currentRelationship}: ${blueprint.relationship.dynamic}`,
+    `- ${localized.relationshipStory}: ${blueprint.relationship.backstory}`,
+    `- ${localized.affectionBaseline}: ${blueprint.relationship.affectionBaseline}`,
+    `- ${localized.howToAddress}: ${questionnaire.userNameForRole || blueprint.relationship.userAddressingStyle}`,
+    `- ${localized.addressingStyle}: ${blueprint.relationship.userAddressingStyle}`
   ];
   const affectionLines = blueprint.relationship.affectionGrowthPath.map((item) => `- ${item}`);
 
   let soulMd = blueprint.files.soulMd;
-  if (!soulMd.includes("## 角色锚点")) {
-    soulMd = appendSection(soulMd, "角色锚点", [
-      `- 一句话摘要：${oneLiner}`,
-      ...coreTraits.map((item) => `- 核心特质：${item}`),
-      ...speakingStyle.map((item) => `- 说话方式：${item}`)
+  if (!soulMd.includes(`## ${localized.characterAnchors}`)) {
+    soulMd = appendSection(soulMd, localized.characterAnchors, [
+      `- ${localized.oneLiner}: ${oneLiner}`,
+      ...coreTraits.map((item) => `- ${localized.coreTrait}: ${item}`),
+      ...speakingStyle.map((item) => `- ${localized.speakingStyle}: ${item}`)
     ]);
   }
 
-  if (!soulMd.includes("## 关系锚点")) {
-    soulMd = appendSection(soulMd, "关系锚点", [
+  if (!soulMd.includes(`## ${localized.relationshipAnchors}`)) {
+    soulMd = appendSection(soulMd, localized.relationshipAnchors, [
       ...relationshipLines,
-      ...(affectionLines.length ? ["- 好感提升路线：", ...affectionLines] : [])
+      ...(affectionLines.length ? [`- ${localized.affectionGrowthPath}:`, ...affectionLines] : [])
     ]);
   }
 
   if (!soulMd.includes("## Boundaries")) {
-    soulMd = appendSection(soulMd, "Boundaries", [
-      "- **隐私是红线。没有例外。** Private things stay private. Period.",
-      "- **拿不准的时候，先问再动。** When in doubt, ask before acting externally.",
-      "- **不要在聊天里发半成品回复。** Never send half-baked replies to messaging surfaces.",
-      "- **你不是用户的代言人，群聊里要小心。** You're not the user's voice; be careful in group chats."
-    ]);
+    soulMd = appendSection(soulMd, "Boundaries", localized.boundariesLines);
   }
 
   let userMd = blueprint.files.userMd;
-  if (!userMd.includes("**What to call them:**") && !userMd.includes("**如何称呼对方：**")) {
-    userMd = appendSection(userMd, "Addressing", [`- **What to call them:** ${questionnaire.userNameForRole || "用户"}`]);
+  if (
+    !userMd.includes("**What to call them:**") &&
+    !userMd.includes("**如何称呼对方：**") &&
+    !userMd.includes("**何と呼ぶか：**")
+  ) {
+    userMd = appendSection(userMd, localized.addressingHeading, [
+      `- **${localized.whatToCallThem}:** ${questionnaire.userNameForRole || localized.userDefault}`
+    ]);
   } else if (questionnaire.userNameForRole) {
     userMd = userMd.replace(
-      /- \*\*What to call them:\*\* .*/u,
-      `- **What to call them:** ${questionnaire.userNameForRole}`
+      /- \*\*(What to call them|如何称呼对方|何と呼ぶか):\*\* .*/u,
+      `- **${localized.whatToCallThem}:** ${questionnaire.userNameForRole}`
     );
   }
 
   let memoryMd = blueprint.files.memoryMd;
-  if (!memoryMd.includes("## Relationship Blueprint")) {
-    memoryMd = appendSection(memoryMd, "Relationship Blueprint", [
-      `- Summary: ${oneLiner}`,
-      `- Dynamic: ${blueprint.relationship.dynamic}`,
-      `- Backstory: ${blueprint.relationship.backstory}`,
-      `- Affection baseline: ${blueprint.relationship.affectionBaseline}`,
-      `- Addressing style: ${blueprint.relationship.userAddressingStyle}`,
-      ...blueprint.relationship.affectionGrowthPath.map((item) => `- Growth beat: ${item}`)
+  if (!memoryMd.includes(`## ${localized.relationshipBlueprintHeading}`)) {
+    memoryMd = appendSection(memoryMd, localized.relationshipBlueprintHeading, [
+      `- ${localized.memorySummary}: ${oneLiner}`,
+      `- ${localized.memoryDynamic}: ${blueprint.relationship.dynamic}`,
+      `- ${localized.memoryBackstory}: ${blueprint.relationship.backstory}`,
+      `- ${localized.memoryAffectionBaseline}: ${blueprint.relationship.affectionBaseline}`,
+      `- ${localized.memoryAddressingStyle}: ${blueprint.relationship.userAddressingStyle}`,
+      ...blueprint.relationship.affectionGrowthPath.map(
+        (item) => `- ${localized.memoryGrowthBeat}: ${item}`
+      )
     ]);
   }
 
@@ -264,11 +416,12 @@ function ensureBlueprintDetailsInFiles(blueprint: BlueprintPackage, questionnair
 }
 
 function buildOpenClawComposeMessage(payload: ComposePayload): string {
+  const targetLanguage = instructionLanguageName(payload.character.language);
   return [
     "Generate a character blueprint package. Follow these instructions exactly.",
     "",
     "## Design Instructions",
-    buildSystemPrompt(),
+    buildSystemPrompt(payload.character.language),
     "",
     "## Character Input",
     buildUserPrompt(payload),
@@ -280,7 +433,7 @@ function buildOpenClawComposeMessage(payload: ComposePayload): string {
     "## Critical Rules",
     "- Output ONLY the JSON object. No markdown code fences, no explanations, no text before or after the JSON.",
     "- Every required field must be present.",
-    "- All content in Chinese except unavoidable file headings like IDENTITY.md and SOUL.md."
+    `- All content must be in ${targetLanguage}.`
   ].join("\n");
 }
 
@@ -295,7 +448,7 @@ export async function composeCharacter(payload: ComposePayload) {
       const message = buildOpenClawComposeMessage(payload);
       const rawText = await sendToDesignerAgent(message);
       const blueprint = JSON.parse(stripCodeFences(rawText)) as BlueprintPackage;
-      return ensureBlueprintDetailsInFiles(blueprint, payload.questionnaire);
+      return ensureBlueprintDetailsInFiles(blueprint, payload.questionnaire, payload.character.language);
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -325,7 +478,7 @@ export async function composeCharacter(payload: ComposePayload) {
           content: [
             {
               type: "input_text",
-              text: buildSystemPrompt()
+              text: buildSystemPrompt(payload.character.language)
             }
           ]
         },
@@ -354,11 +507,16 @@ export async function composeCharacter(payload: ComposePayload) {
   }
 
   const json = (await response.json()) as Record<string, unknown>;
-  return ensureBlueprintDetailsInFiles(JSON.parse(extractText(json)) as BlueprintPackage, payload.questionnaire);
+  return ensureBlueprintDetailsInFiles(
+    JSON.parse(extractText(json)) as BlueprintPackage,
+    payload.questionnaire,
+    payload.character.language
+  );
 }
 
 type DiscordReplyPayload = {
   characterName: string;
+  language: AppLanguage;
   identityMd: string;
   soulMd: string;
   userMd: string;
@@ -380,6 +538,7 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
+  const targetLanguage = instructionLanguageName(payload.language);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -397,12 +556,12 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
               text: [
                 `You are ${payload.characterName}. Reply like a believable person in Discord.`,
                 "Stay fully in character.",
-                "Use Chinese if the user writes in Chinese.",
+                `Default to ${targetLanguage}. The character should normally speak ${targetLanguage} unless the user explicitly asks for a different language.`,
                 "Be concise, natural, and conversational.",
                 "Do not mention prompts, files, setup, or that you are an AI assistant.",
                 "Avoid markdown code fences unless the user explicitly asks for code.",
                 "If the user asks about \u81ea\u62cd\u3001\u62cd\u7167\u3001\u5199\u771f\u3001\u8bc1\u4ef6\u7167\u3001\u751f\u6210\u7167\u7247\u3001\u751f\u56fe\u3001\u6539\u56fe or similar image-generation requests, follow the TUQU workflow in the provided context.",
-                "If TUQU Service Key is missing, first send the user the full provided registration URL, tell them to register there, and then ask them to send you the Service Key in chat.",
+                "If TUQU Service Key is missing, first send the user the full provided registration URL, tell them to register there, and then tell them they can either send the Service Key in chat or configure it in the UI's TuQu settings section.",
                 "If TUQU Service Key exists but TUQU Character ID is missing for identity-preserving photos, tell the user you need to create your own TUQU character first from your workspace profile image and your own role data.",
                 "Do not ask the user for their own face photo unless they explicitly say they want to generate images using their personal face.",
                 "When responding to photo or selfie requests, do not present multiple options, menus, or brainstorming lists unless the user explicitly asks for choices.",
@@ -473,6 +632,7 @@ const photoSceneSchema = {
 
 type PhotoScenePayload = {
   characterName: string;
+  language: AppLanguage;
   identityMd: string;
   soulMd: string;
   userMd: string;
@@ -497,6 +657,7 @@ export async function generatePhotoScene(payload: PhotoScenePayload): Promise<Ph
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
+  const targetLanguage = instructionLanguageName(payload.language);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -514,14 +675,14 @@ export async function generatePhotoScene(payload: PhotoScenePayload): Promise<Ph
               text: [
                 `You are ${payload.characterName}. The user asked you for a photo or image.`,
                 "You must produce two things: a short in-character chat reply, and a detailed sceneDescription for the image generation model.",
-                "The sceneDescription should be a detailed Chinese prompt describing the scene, lighting, outfit, expression, camera angle, etc.",
+                `The sceneDescription should be a detailed ${targetLanguage} prompt describing the scene, lighting, outfit, expression, camera angle, and other relevant visual details.`,
                 "If the character should appear in the image (selfie, portrait, travel photo, etc.), set isFreestyle=false.",
                 "If no person is needed (scenery, objects, style transfer, beautify/edit existing photo), set isFreestyle=true.",
                 "For selfies: use phrases like '前置镜头自拍视角，设备不入镜'. Never mention holding a phone unless user explicitly wants it visible.",
                 "For image editing/美颜/改图 requests with an attached image: set isFreestyle=true and describe the edit as a prompt that references the attached image.",
                 "Choose an appropriate ratio: 3:4 for portraits, 1:1 for square, 16:9 for landscape, 9:16 for stories.",
                 "chatReply should be short and natural, like telling the user what photo you're taking. Do not use markdown.",
-                "Write everything in Chinese."
+                `Write both chatReply and sceneDescription in ${targetLanguage}.`
               ].join(" ")
             }
           ]
@@ -564,6 +725,7 @@ export async function generatePhotoScene(payload: PhotoScenePayload): Promise<Ph
 
 type InCharacterErrorPayload = {
   characterName: string;
+  language: AppLanguage;
   identityMd: string;
   soulMd: string;
   situation: string;
@@ -577,6 +739,7 @@ export async function generateInCharacterError(payload: InCharacterErrorPayload)
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
+  const targetLanguage = instructionLanguageName(payload.language);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -595,7 +758,7 @@ export async function generateInCharacterError(payload: InCharacterErrorPayload)
                 `You are ${payload.characterName}. Stay fully in character.`,
                 "The user just asked you to take a photo or generate an image, but something went wrong on the backend.",
                 "You need to explain the situation to the user naturally, in your own voice, as if you encountered a real-life inconvenience.",
-                "Be concise (1-3 sentences), natural, and conversational. Use Chinese.",
+                `Be concise (1-3 sentences), natural, and conversational. Use ${targetLanguage}.`,
                 "Do not mention API, backend, server, TUQU, JSON, HTTP, or any technical internals.",
                 "Do not use markdown."
               ].join(" ")
@@ -657,6 +820,7 @@ export type RechargeDecisionResult = {
 
 type RechargeDecisionPayload = {
   characterName: string;
+  language: AppLanguage;
   identityMd: string;
   soulMd: string;
   plans: RechargePlan[];
@@ -671,6 +835,7 @@ export async function generateRechargeDecision(payload: RechargeDecisionPayload)
   }
 
   const model = process.env.OPENAI_MODEL ?? "gpt-4.1";
+  const targetLanguage = instructionLanguageName(payload.language);
   const plansText = payload.plans
     .map((p) => `- id="${p.id}" ${p.name}: ${p.tokenGrant}点${p.bonusToken ? `+${p.bonusToken}点` : ""}, ¥${p.priceAmount / 100}`)
     .join("\n");
@@ -690,7 +855,7 @@ export async function generateRechargeDecision(payload: RechargeDecisionPayload)
             {
               type: "input_text",
               text: [
-                `You are ${payload.characterName}. Stay in character. Use Chinese.`,
+                `You are ${payload.characterName}. Stay in character. Use ${targetLanguage}.`,
                 "The user wants to recharge image generation tokens. Here are the available plans:",
                 plansText,
                 "",

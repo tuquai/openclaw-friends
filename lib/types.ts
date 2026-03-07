@@ -1,3 +1,5 @@
+export type AppLanguage = "zh" | "en" | "ja";
+
 export type PersonalityAxes = {
   socialEnergy: string;
   informationFocus: string;
@@ -117,6 +119,7 @@ export type CharacterRecord = {
   concept: string;
   mbti: string;
   personality: PersonalityAxes;
+  language: AppLanguage;
   photos: string[];
   createdAt: string;
   updatedAt: string;
@@ -138,11 +141,13 @@ export type DraftCharacterInput = {
   concept: string;
   mbti: string;
   personality: PersonalityAxes;
+  language: AppLanguage;
   photos: string[];
   preset?: string;
 };
 
 export type UserProfileInput = {
+  language: AppLanguage;
   userMbti: string;
   userPersonality: PersonalityAxes;
   lifeStage: SingleChoiceInput;

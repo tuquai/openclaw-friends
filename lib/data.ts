@@ -4,6 +4,7 @@ import path from "path";
 import { buildDiscordAccountId } from "@/lib/discord-account";
 import { inferMbtiFromAxes, PERSONALITY_AXIS_OPTIONS, QUESTION_OPTIONS } from "@/lib/mbti";
 import {
+  AppLanguage,
   BlueprintPackage,
   CharacterRecord,
   DiscordLink,
@@ -15,6 +16,7 @@ import {
   UserProfileInput
 } from "@/lib/types";
 import { readWorkspaceCharacterRecords, writeCharacterRecord } from "@/lib/workspace";
+import { normalizeLanguage } from "@/lib/i18n";
 
 const dataDir = path.join(process.cwd(), "data");
 const uploadDir = path.join(process.cwd(), "public", "uploads");
@@ -43,6 +45,7 @@ const seedCharacter: CharacterRecord = {
     "明亮、时髦、会聊天、情绪表达丰富，带一点柔和的日系校园感。重点不是堆背景，而是锁定语气、审美偏好、关系边界、会被什么话题点亮。",
   mbti: "ENFP",
   personality: seedPersonality,
+  language: "zh",
   photos: [],
   preset: "Xingzi Baseline",
   createdAt: "2026-03-02T00:00:00.000Z",
@@ -290,6 +293,7 @@ function defaultUserProfile(): UserProfileInput {
   };
 
   return {
+    language: "zh",
     userMbti: inferMbtiFromAxes(userPersonality),
     userPersonality,
     lifeStage: { selected: QUESTION_OPTIONS.lifeStage[3], custom: "" },
@@ -316,6 +320,7 @@ function normalizeUserProfile(raw?: Partial<UserProfileInput | QuestionnaireInpu
   const userPersonality = normalizePersonality(raw?.userPersonality, raw?.userMbti ?? fallback.userMbti);
 
   return {
+    language: normalizeLanguage((raw as { language?: string } | undefined)?.language),
     userMbti: inferMbtiFromAxes(userPersonality),
     userPersonality,
     lifeStage: {
@@ -463,6 +468,7 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     concept: conceptParts.join("\n\n"),
     mbti: raw.mbti ?? inferMbtiFromAxes(personality),
     personality,
+    language: normalizeLanguage((raw as { language?: string }).language),
     photos: Array.isArray(raw.photos) ? raw.photos : [],
     createdAt: raw.createdAt ?? new Date().toISOString(),
     updatedAt: raw.updatedAt ?? new Date().toISOString(),
@@ -477,6 +483,38 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     tuquConfig,
     workspacePath: raw.workspacePath,
     preset: raw.preset
+  };
+}
+
+async function filterExistingPhotoPaths(photos: string[]) {
+  const resolved = await Promise.all(
+    photos.map(async (photo) => {
+      if (!photo.startsWith("/uploads/")) {
+        return photo;
+      }
+
+      const filePath = path.join(process.cwd(), "public", photo.replace(/^\//, ""));
+      try {
+        await fs.access(filePath);
+        return photo;
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  return resolved.filter((photo): photo is string => Boolean(photo));
+}
+
+async function sanitizeCharacterPhotos(record: CharacterRecord) {
+  const photos = await filterExistingPhotoPaths(record.photos);
+  if (photos.length === record.photos.length) {
+    return record;
+  }
+
+  return {
+    ...record,
+    photos
   };
 }
 
@@ -596,7 +634,15 @@ async function enrichWithWorkspaceData(record: CharacterRecord, workspacePath: s
 async function readLocalCharacters(): Promise<CharacterRecord[]> {
   await ensureStorage();
   const raw = await fs.readFile(dataFile, "utf8");
-  return (JSON.parse(raw) as LegacyCharacterRecord[]).map(normalizeCharacterRecord);
+  const normalized = (JSON.parse(raw) as LegacyCharacterRecord[]).map(normalizeCharacterRecord);
+  const sanitized = await Promise.all(normalized.map((record) => sanitizeCharacterPhotos(record)));
+  const hasChanges = sanitized.some((record, index) => record.photos.length !== normalized[index]?.photos.length);
+
+  if (hasChanges) {
+    await writeLocalCharacters(sanitized);
+  }
+
+  return sanitized;
 }
 
 async function writeLocalCharacters(characters: CharacterRecord[]) {
@@ -620,7 +666,12 @@ async function readCharacters() {
   const workspaceCharacters = await Promise.all(
     workspaceRecords.map(async ({ raw, workspacePath }) => {
       const normalized = normalizeCharacterRecord(raw as LegacyCharacterRecord);
-      return enrichWithWorkspaceData(normalized, workspacePath);
+      const enriched = await enrichWithWorkspaceData(normalized, workspacePath);
+      const sanitized = await sanitizeCharacterPhotos(enriched);
+      if (sanitized.photos.length !== enriched.photos.length) {
+        await writeCharacterRecord(sanitized);
+      }
+      return sanitized;
     })
   );
   const workspaceIds = new Set(workspaceCharacters.map((c) => c.id));
@@ -654,6 +705,7 @@ function buildCharacterPatch(input: DraftCharacterInput): Omit<CharacterRecord, 
     concept: input.concept,
     mbti: input.mbti || inferMbtiFromAxes(personality),
     personality,
+    language: normalizeLanguage(input.language),
     photos: input.photos,
     preset: input.preset
   };

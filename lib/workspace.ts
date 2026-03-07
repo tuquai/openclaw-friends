@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
+import { normalizeLanguage } from "@/lib/i18n";
 
 function getWorkspaceRoot() {
   return process.env.OPENCLAW_WORKSPACE_ROOT ?? path.join(os.homedir(), ".openclaw");
@@ -148,7 +149,7 @@ Write a detailed Chinese prompt covering subject, composition, lighting, style, 
 
 Only for photos where ${name} must appear and be recognizable:
 
-- First check whether \`tuqu_service_key.txt\` exists. If missing, send the user the TUQU registration URL and ask them to register and provide a Service Key.
+- First check whether \`tuqu_service_key.txt\` exists. If missing, send the user the TUQU registration URL and ask them to register, then either send the Service Key in chat or configure it in the UI's TuQu settings section.
 - Once the key exists, ensure a TUQU character is created: if \`tuqu_character.json\` is missing, run \`create-character.sh\` automatically as an internal prerequisite.
 - Then run \`generate-selfie.sh\` with a scene description built from dialogue context.
 - Do not show a phone in-frame for normal selfies. Only include a visible phone when the user asks for 对镜自拍 or mirror selfie.
@@ -1605,6 +1606,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
       lifestylePace: "",
       otherNotes: ""
     },
+    language: normalizeLanguage((base as { language?: string }).language),
     photos,
     createdAt: base.createdAt ?? now,
     updatedAt: now,
