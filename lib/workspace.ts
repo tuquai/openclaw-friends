@@ -1240,7 +1240,7 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
 
   const workspaceRoot = getWorkspaceRoot();
   const dirName = `workspace-${slugify(character.name)}-${character.id.slice(0, 8)}`;
-  const workspacePath = path.join(workspaceRoot, dirName);
+  const workspacePath = character.workspacePath || path.join(workspaceRoot, dirName);
   const avatarsDir = path.join(workspacePath, "avatars");
   const memoryDir = path.join(workspacePath, "memory");
   const openclawDir = path.join(workspacePath, ".openclaw");

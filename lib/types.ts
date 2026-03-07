@@ -120,7 +120,7 @@ export type CharacterRecord = {
   photos: string[];
   createdAt: string;
   updatedAt: string;
-  questionnaire?: QuestionnaireInput;
+  questionnaire?: RelationshipQuestionnaireInput;
   blueprintPackage?: BlueprintPackage;
   discordLink?: DiscordLink;
   tuquConfig?: TuquConfig;
@@ -142,12 +142,15 @@ export type DraftCharacterInput = {
   preset?: string;
 };
 
-export type QuestionnaireInput = {
-  userNameForRole: string;
+export type UserProfileInput = {
   userMbti: string;
   userPersonality: PersonalityAxes;
   lifeStage: SingleChoiceInput;
   communicationPreference: SingleChoiceInput;
+};
+
+export type RelationshipQuestionnaireInput = {
+  userNameForRole: string;
   desiredBond: SingleChoiceInput;
   treatmentPreference: MultiChoiceInput;
   specialTraits: MultiChoiceInput;
@@ -157,3 +160,5 @@ export type QuestionnaireInput = {
     growthRouteCustom: string;
   };
 };
+
+export type QuestionnaireInput = UserProfileInput & RelationshipQuestionnaireInput;

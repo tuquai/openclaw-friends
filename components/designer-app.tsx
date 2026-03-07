@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { buildDiscordAccountId } from "@/lib/discord-account";
 import {
   BlueprintPackage,
@@ -11,7 +11,9 @@ import {
   DraftCharacterInput,
   MultiChoiceInput,
   QuestionnaireInput,
-  SingleChoiceInput
+  RelationshipQuestionnaireInput,
+  SingleChoiceInput,
+  UserProfileInput
 } from "@/lib/types";
 import type { WorkspaceSummary } from "@/lib/workspace";
 import type { TuquConfig } from "@/lib/types";
@@ -24,9 +26,18 @@ import {
 
 type DesignerAppProps = {
   initialCharacters: CharacterRecord[];
+  initialUserProfile: UserProfileInput;
 };
 
 type DesignerViewMode = "browse" | "edit";
+type EditorStep = "profile" | "details" | "discord" | "tuqu";
+
+const EDITOR_STEPS: Array<{ key: EditorStep; title: string; description: string }> = [
+  { key: "profile", title: "角色信息", description: "填写角色基础信息和关系问卷" },
+  { key: "details", title: "角色详情", description: "预览蓝图并修改 markdown" },
+  { key: "discord", title: "Discord 设置", description: "配置频道、用户和 bot token" },
+  { key: "tuqu", title: "TuQu 设置", description: "配置 Service Key 和角色 ID" }
+];
 
 const defaultCharacterPersonality = {
   socialEnergy: PERSONALITY_AXIS_OPTIONS.socialEnergy[0].value,
@@ -58,12 +69,15 @@ const initialDraft: DraftCharacterInput = {
   preset: "Custom"
 };
 
-const initialQuestionnaire: QuestionnaireInput = {
-  userNameForRole: "",
+const initialUserProfile: UserProfileInput = {
   userMbti: inferMbtiFromAxes(defaultUserPersonality),
   userPersonality: defaultUserPersonality,
   lifeStage: { selected: QUESTION_OPTIONS.lifeStage[3], custom: "" },
-  communicationPreference: { selected: QUESTION_OPTIONS.communicationPreference[0], custom: "" },
+  communicationPreference: { selected: QUESTION_OPTIONS.communicationPreference[0], custom: "" }
+};
+
+const initialRelationshipQuestionnaire: RelationshipQuestionnaireInput = {
+  userNameForRole: "",
   desiredBond: { selected: QUESTION_OPTIONS.desiredBond[0], custom: "" },
   treatmentPreference: { selected: [QUESTION_OPTIONS.treatmentPreference[0]], custom: "" },
   specialTraits: { selected: [QUESTION_OPTIONS.specialTraits[0]], custom: "" },
@@ -118,12 +132,38 @@ function characterAvatarSrc(character: Pick<CharacterRecord, "id" | "updatedAt">
   return `/api/characters/${character.id}/avatar${query}`;
 }
 
-export function DesignerApp({ initialCharacters }: DesignerAppProps) {
+function snapshotDraft(input: DraftCharacterInput) {
+  return JSON.stringify(input);
+}
+
+function snapshotUserProfile(input: UserProfileInput) {
+  return JSON.stringify({
+    ...input,
+    userMbti: inferMbtiFromAxes(input.userPersonality)
+  });
+}
+
+function snapshotRelationshipQuestionnaire(input: RelationshipQuestionnaireInput) {
+  return JSON.stringify(input);
+}
+
+function isBrowserAccessiblePhoto(photo: string) {
+  return (
+    photo.startsWith("/") ||
+    photo.startsWith("http://") ||
+    photo.startsWith("https://") ||
+    photo.startsWith("data:")
+  );
+}
+
+export function DesignerApp({ initialCharacters, initialUserProfile: initialUserProfileProp }: DesignerAppProps) {
   const [characters, setCharacters] = useState(initialCharacters);
   const [selectedId, setSelectedId] = useState(initialCharacters[0]?.id ?? "");
   const [viewMode, setViewMode] = useState<DesignerViewMode>(initialCharacters.length ? "browse" : "edit");
+  const [editorStep, setEditorStep] = useState<EditorStep>("profile");
   const [draft, setDraft] = useState(initialDraft);
-  const [questionnaire, setQuestionnaire] = useState(initialQuestionnaire);
+  const [userProfile, setUserProfile] = useState(initialUserProfileProp);
+  const [relationshipQuestionnaire, setRelationshipQuestionnaire] = useState(initialRelationshipQuestionnaire);
   const [discordLinkDraft, setDiscordLinkDraft] = useState<DiscordLink>(emptyDiscordLink());
   const [tuquConfigDraft, setTuquConfigDraft] = useState<TuquConfig>(defaultTuquConfig());
   const [discordBotTokenDraft, setDiscordBotTokenDraft] = useState("");
@@ -137,6 +177,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     accounts: []
   });
   const [status, setStatus] = useState("准备创建新角色。");
+  const [userProfileStatus, setUserProfileStatus] = useState("关于我会自动保存，创建新角色时直接复用。");
   const [workspaceStatus, setWorkspaceStatus] = useState("");
   const [discordStatus, setDiscordStatus] = useState("");
   const [blueprintFilesStatus, setBlueprintFilesStatus] = useState("");
@@ -144,8 +185,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const [discordRuntimeMessage, setDiscordRuntimeMessage] = useState("");
   
   const [isSaving, startSaving] = useTransition();
-  const [isComposing, startComposing] = useTransition();
-  const [isCreatingWorkspace, startCreatingWorkspace] = useTransition();
+  const [isAdvancingProfile, startAdvancingProfile] = useTransition();
   const [isSavingDiscord, startSavingDiscord] = useTransition();
   const [isSavingBlueprintFiles, startSavingBlueprintFiles] = useTransition();
   const [isSavingTuqu, startSavingTuqu] = useTransition();
@@ -157,6 +197,15 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const [availableWorkspaces, setAvailableWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [isLoadingWorkspaces, startLoadingWorkspaces] = useTransition();
   const [isImportingWorkspace, startImportingWorkspace] = useTransition();
+  const userProfileHydratedRef = useRef(false);
+  const userProfileSavedSnapshotRef = useRef(
+    snapshotUserProfile(initialUserProfileProp)
+  );
+  const draftBaselineSnapshotRef = useRef(snapshotDraft(initialDraft));
+  const userProfileBaselineSnapshotRef = useRef(snapshotUserProfile(initialUserProfileProp));
+  const relationshipBaselineSnapshotRef = useRef(
+    snapshotRelationshipQuestionnaire(initialRelationshipQuestionnaire)
+  );
   
 
   const selected = characters.find((character) => character.id === selectedId) ?? null;
@@ -164,7 +213,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const savedDiscordAccounts = Object.values(discordRuntimeConfig.accounts);
   const isEditingExisting = Boolean(selected);
   const inferredCharacterMbti = inferMbtiFromAxes(draft.personality);
-  const inferredUserMbti = inferMbtiFromAxes(questionnaire.userPersonality);
+  const inferredUserMbti = inferMbtiFromAxes(userProfile.userPersonality);
   const activePreset = summarizeMbti(inferredCharacterMbti);
   const activeUserPreset = summarizeMbti(inferredUserMbti);
   const coreTraits = safeList(selected?.blueprintPackage?.character.coreTraits);
@@ -175,16 +224,39 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   const optionalDeepeningQuestions = safeList(
     selected?.blueprintPackage?.followups.optionalDeepeningQuestions
   );
+  const currentEditorStepIndex = EDITOR_STEPS.findIndex((step) => step.key === editorStep);
+  const currentEditorStepMeta = EDITOR_STEPS[currentEditorStepIndex] ?? EDITOR_STEPS[0];
+  const currentDraftSnapshot = snapshotDraft(serializedDraft());
+  const currentUserProfileSnapshot = snapshotUserProfile({
+    ...userProfile,
+    userMbti: inferredUserMbti
+  });
+  const currentRelationshipSnapshot = snapshotRelationshipQuestionnaire(serializedQuestionnaire());
+  const isProfileStepDirty =
+    currentDraftSnapshot !== draftBaselineSnapshotRef.current ||
+    currentUserProfileSnapshot !== userProfileBaselineSnapshotRef.current ||
+    currentRelationshipSnapshot !== relationshipBaselineSnapshotRef.current;
+  const canJumpToAnyStep = Boolean(selected?.workspacePath);
 
   useEffect(() => {
     setDraft(selected ? draftFromCharacter(selected) : initialDraft);
-    setQuestionnaire(selected?.questionnaire ?? initialQuestionnaire);
+    setRelationshipQuestionnaire(selected?.questionnaire ?? initialRelationshipQuestionnaire);
     setDiscordLinkDraft(selected?.discordLink ?? emptyDiscordLink());
     setTuquConfigDraft(selected?.tuquConfig ?? defaultTuquConfig());
     setBlueprintFilesDraft(selected?.blueprintPackage?.files ?? emptyBlueprintFiles());
     setDiscordStatus("");
     setTuquStatus("");
     setBlueprintFilesStatus("");
+    setWorkspaceStatus("");
+    setShowTuquCharacterInfo(false);
+    draftBaselineSnapshotRef.current = snapshotDraft(selected ? draftFromCharacter(selected) : initialDraft);
+    userProfileBaselineSnapshotRef.current = snapshotUserProfile({
+      ...userProfile,
+      userMbti: inferMbtiFromAxes(userProfile.userPersonality)
+    });
+    relationshipBaselineSnapshotRef.current = snapshotRelationshipQuestionnaire(
+      selected?.questionnaire ?? initialRelationshipQuestionnaire
+    );
   }, [selected]);
 
   useEffect(() => {
@@ -199,6 +271,56 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   useEffect(() => {
     void loadDiscordRuntimeState();
   }, []);
+
+  useEffect(() => {
+    const nextSnapshot = snapshotUserProfile({
+      ...userProfile,
+      userMbti: inferredUserMbti
+    });
+
+    if (!userProfileHydratedRef.current) {
+      userProfileHydratedRef.current = true;
+      return;
+    }
+
+    if (nextSnapshot === userProfileSavedSnapshotRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setUserProfileStatus("正在保存“关于我”...");
+        const response = await fetch("/api/user-profile", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            ...userProfile,
+            userMbti: inferredUserMbti
+          }),
+          signal: controller.signal
+        });
+        const json = (await response.json()) as { userProfile?: UserProfileInput; error?: string };
+        if (!response.ok || !json.userProfile) {
+          throw new Error(json.error ?? "保存“关于我”失败");
+        }
+        userProfileSavedSnapshotRef.current = snapshotUserProfile(json.userProfile);
+        setUserProfileStatus("“关于我”已自动保存，新角色会直接复用。");
+      } catch (error) {
+        if ((error as Error).name === "AbortError") {
+          return;
+        }
+        setUserProfileStatus(error instanceof Error ? error.message : "保存“关于我”失败");
+      }
+    }, 400);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [userProfile, inferredUserMbti]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files?.length) {
@@ -243,18 +365,19 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     });
   }
 
-  function handleUserPersonalityChange(key: keyof QuestionnaireInput["userPersonality"], value: string) {
-    setQuestionnaire((current) => {
+  function handleUserPersonalityChange(key: keyof UserProfileInput["userPersonality"], value: string) {
+    setUserProfile((current) => {
       const userPersonality = { ...current.userPersonality, [key]: value };
       return { ...current, userPersonality, userMbti: inferMbtiFromAxes(userPersonality) };
     });
   }
 
-  function handleSingleChoiceChange<K extends keyof Pick<
-    QuestionnaireInput,
-    "lifeStage" | "communicationPreference" | "desiredBond"
-  >>(key: K, field: keyof SingleChoiceInput, value: string) {
-    setQuestionnaire((current) => ({
+  function handleUserSingleChoiceChange<K extends keyof Pick<UserProfileInput, "lifeStage" | "communicationPreference">>(
+    key: K,
+    field: keyof SingleChoiceInput,
+    value: string
+  ) {
+    setUserProfile((current) => ({
       ...current,
       [key]: {
         ...current[key],
@@ -263,11 +386,25 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     }));
   }
 
-  function handleMultiChoiceToggle<K extends keyof Pick<QuestionnaireInput, "treatmentPreference" | "specialTraits">>(
+  function handleRelationshipSingleChoiceChange<
+    K extends keyof Pick<RelationshipQuestionnaireInput, "desiredBond">
+  >(key: K, field: keyof SingleChoiceInput, value: string) {
+    setRelationshipQuestionnaire((current) => ({
+      ...current,
+      [key]: {
+        ...current[key],
+        [field]: value
+      }
+    }));
+  }
+
+  function handleMultiChoiceToggle<
+    K extends keyof Pick<RelationshipQuestionnaireInput, "treatmentPreference" | "specialTraits">
+  >(
     key: K,
     value: string
   ) {
-    setQuestionnaire((current) => {
+    setRelationshipQuestionnaire((current) => {
       const selectedItems = current[key].selected.includes(value)
         ? current[key].selected.filter((item) => item !== value)
         : [...current[key].selected, value];
@@ -282,11 +419,13 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     });
   }
 
-  function handleMultiChoiceCustomChange<K extends keyof Pick<QuestionnaireInput, "treatmentPreference" | "specialTraits">>(
+  function handleMultiChoiceCustomChange<
+    K extends keyof Pick<RelationshipQuestionnaireInput, "treatmentPreference" | "specialTraits">
+  >(
     key: K,
     value: string
   ) {
-    setQuestionnaire((current) => ({
+    setRelationshipQuestionnaire((current) => ({
       ...current,
       [key]: {
         ...current[key],
@@ -340,10 +479,31 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
   }
 
   function serializedQuestionnaire() {
+    return relationshipQuestionnaire;
+  }
+
+  function composeQuestionnairePayload(): QuestionnaireInput {
     return {
-      ...questionnaire,
+      ...userProfile,
+      ...relationshipQuestionnaire,
       userMbti: inferredUserMbti
     };
+  }
+
+  function draftPhotoPreviewSrc(photo: string, index: number) {
+    if (photo.startsWith("/uploads/")) {
+      return photo;
+    }
+
+    if (isBrowserAccessiblePhoto(photo)) {
+      return photo;
+    }
+
+    if (selected && index === 0) {
+      return characterAvatarSrc(selected);
+    }
+
+    return photo;
   }
 
   async function loadDiscordRuntimeState() {
@@ -416,7 +576,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
       body: JSON.stringify({
         characterId: character.id,
         character: draftFromCharacter(character),
-        questionnaire: serializedQuestionnaire()
+        questionnaire: composeQuestionnairePayload()
       })
     });
 
@@ -431,8 +591,9 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
   function startNewCharacter() {
     setSelectedId("");
+    setEditorStep("profile");
     setDraft(initialDraft);
-    setQuestionnaire(initialQuestionnaire);
+    setRelationshipQuestionnaire(initialRelationshipQuestionnaire);
     setDiscordLinkDraft(emptyDiscordLink());
     setTuquConfigDraft(defaultTuquConfig());
     setBlueprintFilesDraft(emptyBlueprintFiles());
@@ -479,6 +640,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
         mergeCharacterRecord(json.character);
         setShowWorkspacePicker(false);
         setViewMode("edit");
+        setEditorStep("profile");
         setStatus(`已导入 workspace 角色「${json.character.name}」，可以编辑并补全缺失的配置。`);
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "导入 workspace 失败");
@@ -488,6 +650,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
   function startEditingCharacter(characterId: string) {
     setSelectedId(characterId);
+    setEditorStep("profile");
     setViewMode("edit");
     setStatus("已进入角色编辑页。");
   }
@@ -496,6 +659,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     if (!selectedId && characters[0]?.id) {
       setSelectedId(characters[0].id);
     }
+    setEditorStep("profile");
     setViewMode("browse");
   }
 
@@ -537,212 +701,298 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     );
   }
 
-  function handleCreate() {
-    startSaving(async () => {
-      try {
-        setWorkspaceStatus("");
-        if (!selected) {
-          setStatus("正在创建角色...");
-          await createCharacterRecord();
-          setStatus("角色已创建。下一步可以填写问卷并生成角色信息。");
-          return;
-        }
-
-        setStatus("正在保存基础信息和问卷...");
-        await updateCharacterRecord(selected.id);
-        setStatus("角色基础信息和问卷已保存。");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "保存失败");
-      }
+  async function syncWorkspace(character: CharacterRecord) {
+    setWorkspaceStatus("正在同步 OpenClaw workspace...");
+    const response = await fetch("/api/workspaces/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        characterId: character.id
+      })
     });
+    const json = (await response.json()) as {
+      workspacePath?: string;
+      openclawRegistration?: { agentId: string; accountId: string; guildId: string };
+      openclawRegistrationError?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !json.workspacePath) {
+      throw new Error(json.error ?? "同步 workspace 失败");
+    }
+
+    const syncedCharacter: CharacterRecord = {
+      ...character,
+      workspacePath: json.workspacePath,
+      discordLink: character.discordLink
+        ? {
+            ...character.discordLink,
+            accountId: json.openclawRegistration?.accountId ?? character.discordLink.accountId,
+            guildId: json.openclawRegistration?.guildId ?? character.discordLink.guildId,
+            workspacePath: json.workspacePath
+          }
+        : character.discordLink
+    };
+
+    mergeCharacterRecord(syncedCharacter);
+
+    const openclawNote = json.openclawRegistration
+      ? ` · OpenClaw 已注册 agent ${json.openclawRegistration.agentId}，平台将自动接管 bot 运行。`
+      : json.openclawRegistrationError
+        ? ` · OpenClaw 注册失败：${json.openclawRegistrationError}`
+        : "";
+    const workspaceMessage = `${character.workspacePath ? "更新完成" : "创建完成"}：${json.workspacePath}${openclawNote}`;
+    setWorkspaceStatus(workspaceMessage);
+
+    return { character: syncedCharacter, workspaceMessage };
   }
 
-  function handleCompose() {
-    startComposing(async () => {
-      try {
-        setWorkspaceStatus("");
-        setStatus("正在保存当前内容并生成角色信息...");
-
-        const character = selected ? await updateCharacterRecord(selected.id) : await createCharacterRecord();
-        await composeBlueprint(character);
-        setViewMode("browse");
-        setStatus("角色信息已生成，已返回角色详情。");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "生成失败");
-      }
-    });
-  }
-
-  function handleCreateWorkspace() {
+  async function saveBlueprintFiles() {
     if (!selected?.blueprintPackage) {
-      setWorkspaceStatus("请先生成角色信息，再同步 workspace。");
-      setStatus("请先生成角色信息，再同步 workspace。");
-      return;
+      throw new Error("请先生成角色信息，再编辑 markdown 文件。");
     }
 
-    startCreatingWorkspace(async () => {
-      try {
-        setWorkspaceStatus("正在同步 OpenClaw workspace...");
-        setStatus("正在同步 OpenClaw workspace...");
-        const response = await fetch("/api/workspaces/create", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            characterId: selected.id
-          })
-        });
-        const json = (await response.json()) as {
-          workspacePath?: string;
-          openclawRegistration?: { agentId: string; accountId: string; guildId: string };
-          openclawRegistrationError?: string;
-          error?: string;
-        };
-        if (!response.ok || !json.workspacePath) {
-          throw new Error(json.error ?? "同步 workspace 失败");
-        }
-        mergeCharacterRecord({
-          ...selected,
-          workspacePath: json.workspacePath,
-          discordLink: selected.discordLink
-            ? {
-                ...selected.discordLink,
-                accountId: json.openclawRegistration?.accountId ?? selected.discordLink.accountId,
-                guildId: json.openclawRegistration?.guildId ?? selected.discordLink.guildId,
-                workspacePath: json.workspacePath
-              }
-            : selected.discordLink
-        });
-        const openclawNote = json.openclawRegistration
-          ? ` · OpenClaw 已注册 agent ${json.openclawRegistration.agentId}，平台将自动接管 bot 运行。`
-          : json.openclawRegistrationError
-            ? ` · OpenClaw 注册失败：${json.openclawRegistrationError}`
-            : "";
-        setWorkspaceStatus(`创建完成：${json.workspacePath}${openclawNote}`);
-        setStatus(`workspace 已同步：${json.workspacePath}${openclawNote}`);
-      } catch (error) {
-        setWorkspaceStatus(error instanceof Error ? error.message : "同步 workspace 失败");
-        setStatus(error instanceof Error ? error.message : "同步 workspace 失败");
-      }
+    setBlueprintFilesStatus("正在保存 markdown 文件...");
+    const response = await fetch("/api/blueprint/files", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        characterId: selected.id,
+        files: blueprintFilesDraft
+      })
     });
-  }
+    const json = (await response.json()) as {
+      character?: CharacterRecord;
+      openclawRegistration?: { agentId: string };
+      openclawRegistrationError?: string;
+      error?: string;
+    };
 
-  function handleSaveDiscordLink() {
-    if (!selected) {
-      setDiscordStatus("请先创建并选中一个角色。");
-      return;
+    if (!response.ok || !json.character) {
+      throw new Error(json.error ?? "保存 markdown 文件失败");
     }
 
-    startSavingDiscord(async () => {
-      try {
-        setDiscordStatus("正在保存 Discord 绑定...");
-        const response = await fetch("/api/discord/link", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            characterId: selected.id,
-            accountId: selectedDiscordAccountId,
-            botToken: discordBotTokenDraft,
-            guildId: discordLinkDraft.guildId?.trim() || undefined,
-            channelId: discordLinkDraft.channelId.trim(),
-            userId: discordLinkDraft.userId.trim()
-          })
-        });
-        const json = (await response.json()) as { character?: CharacterRecord; error?: string };
-        if (!response.ok || !json.character) {
-          throw new Error(json.error ?? "保存 Discord 绑定失败");
-        }
+    mergeCharacterRecord(json.character);
+    setBlueprintFilesDraft(json.character.blueprintPackage?.files ?? emptyBlueprintFiles());
+    setBlueprintFilesStatus(
+      json.character.workspacePath
+        ? "Markdown 文件已保存，并同步写入当前 workspace。"
+        : "Markdown 文件已保存。创建 workspace 时会使用你手动编辑后的内容。"
+    );
 
-        mergeCharacterRecord(json.character);
-        setDiscordLinkDraft(json.character.discordLink ?? emptyDiscordLink());
-        setDiscordStatus(
-          json.character.workspacePath
-            ? "Discord 绑定和 Bot Token 已保存，并同步写入当前 workspace。"
-            : "Discord 绑定和 Bot Token 已保存。创建 workspace 后会自动写入该角色的 workspace。"
-        );
-      } catch (error) {
-        setDiscordStatus(error instanceof Error ? error.message : "保存 Discord 绑定失败");
-      }
-    });
+    return json.character;
   }
 
   function handleSaveBlueprintFiles() {
-    if (!selected?.blueprintPackage) {
-      setBlueprintFilesStatus("请先生成角色信息，再编辑 markdown 文件。");
-      return;
-    }
-
     startSavingBlueprintFiles(async () => {
       try {
-        setBlueprintFilesStatus("正在保存 markdown 文件...");
-        const response = await fetch("/api/blueprint/files", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            characterId: selected.id,
-            files: blueprintFilesDraft
-          })
-        });
-        const json = (await response.json()) as { character?: CharacterRecord; error?: string };
-        if (!response.ok || !json.character) {
-          throw new Error(json.error ?? "保存 markdown 文件失败");
-        }
-
-        mergeCharacterRecord(json.character);
-        setBlueprintFilesDraft(json.character.blueprintPackage?.files ?? emptyBlueprintFiles());
-        setBlueprintFilesStatus(
-          json.character.workspacePath
-            ? "Markdown 文件已保存，并同步写入当前 workspace。"
-            : "Markdown 文件已保存。创建 workspace 时会使用你手动编辑后的内容。"
-        );
+        await saveBlueprintFiles();
       } catch (error) {
         setBlueprintFilesStatus(error instanceof Error ? error.message : "保存 markdown 文件失败");
       }
     });
   }
 
-  function handleSaveTuquConfig() {
+  async function saveDiscordLinkConfig() {
     if (!selected) {
-      setTuquStatus("请先创建并选中一个角色。");
+      throw new Error("请先创建并选中一个角色。");
+    }
+
+    setDiscordStatus("正在保存 Discord 绑定...");
+    const response = await fetch("/api/discord/link", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        characterId: selected.id,
+        accountId: selectedDiscordAccountId,
+        botToken: discordBotTokenDraft,
+        guildId: discordLinkDraft.guildId?.trim() || undefined,
+        channelId: discordLinkDraft.channelId.trim(),
+        userId: discordLinkDraft.userId.trim()
+      })
+    });
+    const json = (await response.json()) as {
+      character?: CharacterRecord;
+      openclawRegistration?: { agentId: string };
+      openclawRegistrationError?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !json.character) {
+      throw new Error(json.error ?? "保存 Discord 绑定失败");
+    }
+
+    mergeCharacterRecord(json.character);
+    setDiscordLinkDraft(json.character.discordLink ?? emptyDiscordLink());
+    const openclawNote = json.openclawRegistration
+      ? ` OpenClaw 已注册 agent ${json.openclawRegistration.agentId}。`
+      : json.openclawRegistrationError
+        ? ` OpenClaw 注册失败：${json.openclawRegistrationError}`
+        : "";
+    setDiscordStatus(
+      json.character.workspacePath
+        ? `Discord 绑定和 Bot Token 已保存，并同步写入当前 workspace。${openclawNote}`.trim()
+        : `Discord 绑定和 Bot Token 已保存。创建 workspace 后会自动写入该角色的 workspace。${openclawNote}`.trim()
+    );
+
+    return json.character;
+  }
+
+  async function saveTuquConfig() {
+    if (!selected) {
+      throw new Error("请先创建并选中一个角色。");
+    }
+
+    setTuquStatus("正在保存 TuQu AI 配置...");
+    const response = await fetch("/api/tuqu/config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        characterId: selected.id,
+        registrationUrl: tuquConfigDraft.registrationUrl,
+        serviceKey: tuquConfigDraft.serviceKey,
+        tuquCharacterId: tuquConfigDraft.characterId
+      })
+    });
+    const json = (await response.json()) as { character?: CharacterRecord; error?: string };
+
+    if (!response.ok || !json.character) {
+      throw new Error(json.error ?? "保存 TuQu AI 配置失败");
+    }
+
+    mergeCharacterRecord(json.character);
+    setTuquConfigDraft(json.character.tuquConfig ?? defaultTuquConfig());
+    setTuquStatus(
+      json.character.workspacePath
+        ? "TuQu AI 配置已保存，并同步写入当前 workspace。"
+        : "TuQu AI 配置已保存。创建 workspace 时会自动写入当前角色。"
+    );
+
+    return json.character;
+  }
+
+  function finishEditor(message: string) {
+    setEditorStep("profile");
+    setViewMode("browse");
+    setStatus(message);
+  }
+
+  function markProfileStepClean() {
+    draftBaselineSnapshotRef.current = snapshotDraft(serializedDraft());
+    userProfileBaselineSnapshotRef.current = snapshotUserProfile({
+      ...userProfile,
+      userMbti: inferredUserMbti
+    });
+    relationshipBaselineSnapshotRef.current = snapshotRelationshipQuestionnaire(serializedQuestionnaire());
+  }
+
+  function handleStepCardClick(step: EditorStep) {
+    if (!canJumpToAnyStep) {
       return;
     }
 
-    startSavingTuqu(async () => {
+    setEditorStep(step);
+    setStatus(`已切换到${EDITOR_STEPS.find((item) => item.key === step)?.title ?? "对应步骤"}。`);
+  }
+
+  function handleProfileNext() {
+    startAdvancingProfile(async () => {
       try {
-        setTuquStatus("正在保存 TuQu AI 配置...");
-        const response = await fetch("/api/tuqu/config", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            characterId: selected.id,
-            registrationUrl: tuquConfigDraft.registrationUrl,
-            serviceKey: tuquConfigDraft.serviceKey,
-            tuquCharacterId: tuquConfigDraft.characterId
-          })
-        });
-        const json = (await response.json()) as { character?: CharacterRecord; error?: string };
-        if (!response.ok || !json.character) {
-          throw new Error(json.error ?? "保存 TuQu AI 配置失败");
+        if (selected?.workspacePath && selected.blueprintPackage && !isProfileStepDirty) {
+          setEditorStep("details");
+          setStatus("第一步没有修改，已直接进入角色详情。");
+          return;
         }
 
-        mergeCharacterRecord(json.character);
-        setTuquConfigDraft(json.character.tuquConfig ?? defaultTuquConfig());
-        setTuquStatus(
-          json.character.workspacePath
-            ? "TuQu AI 配置已保存，并同步写入当前 workspace。"
-            : "TuQu AI 配置已保存。创建 workspace 时会自动写入当前角色。"
-        );
+        setWorkspaceStatus("");
+        setStatus("正在保存角色、生成角色详情并同步 workspace...");
+
+        const savedCharacter = selected ? await updateCharacterRecord(selected.id) : await createCharacterRecord();
+        const blueprintPackage = await composeBlueprint(savedCharacter);
+        const characterWithBlueprint = {
+          ...savedCharacter,
+          blueprintPackage
+        };
+
+        mergeCharacterRecord(characterWithBlueprint);
+        setBlueprintFilesDraft(blueprintPackage.files);
+
+        const { workspaceMessage } = await syncWorkspace(characterWithBlueprint);
+        markProfileStepClean();
+        setEditorStep("details");
+        setStatus(`基础信息、关系问卷和 workspace 已同步。${workspaceMessage}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "角色生成失败";
+        setWorkspaceStatus(message);
+        setStatus(message);
+      }
+    });
+  }
+
+  function handleDetailsPrevious() {
+    setEditorStep("profile");
+  }
+
+  function handleDetailsNext() {
+    startSavingBlueprintFiles(async () => {
+      try {
+        await saveBlueprintFiles();
+        setEditorStep("discord");
+        setStatus("角色详情已保存，继续设置 Discord。");
+      } catch (error) {
+        setBlueprintFilesStatus(error instanceof Error ? error.message : "保存 markdown 文件失败");
+      }
+    });
+  }
+
+  function handleDiscordPrevious() {
+    setEditorStep("details");
+  }
+
+  function handleDiscordNext() {
+    startSavingDiscord(async () => {
+      try {
+        await saveDiscordLinkConfig();
+        setEditorStep("tuqu");
+        setStatus("Discord 配置已保存，继续设置 TuQu。");
+      } catch (error) {
+        setDiscordStatus(error instanceof Error ? error.message : "保存 Discord 绑定失败");
+      }
+    });
+  }
+
+  function handleDiscordSkip() {
+    setDiscordStatus("已跳过 Discord 设置。");
+    setEditorStep("tuqu");
+    setStatus("已跳过 Discord 设置，继续配置 TuQu。");
+  }
+
+  function handleTuquPrevious() {
+    setEditorStep("discord");
+  }
+
+  function handleTuquFinish() {
+    startSavingTuqu(async () => {
+      try {
+        await saveTuquConfig();
+        finishEditor("角色设置已完成，已返回主页。");
       } catch (error) {
         setTuquStatus(error instanceof Error ? error.message : "保存 TuQu AI 配置失败");
       }
     });
+  }
+
+  function handleTuquSkip() {
+    setTuquStatus("已跳过 TuQu 设置。");
+    finishEditor("角色设置已完成，已返回主页。");
   }
 
   function handleCreateTuquCharacter() {
@@ -825,33 +1075,22 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
     });
   }
 
-  function renderQuestionnairePanel() {
+  function renderUserProfilePanel() {
     return (
       <section className="panel">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h3>关系问卷</h3>
-              <p>这里改成了更一般的问题。你不需要先知道自己的 MBTI，也可以描述想被怎样对待，以及关系如何升温。</p>
+              <h3>我的信息</h3>
+              <p>这里记录稳定的用户信息。修改后会自动保存，后续新建角色时直接复用。</p>
             </div>
           </div>
 
+          <div className="subsection-header">
+            <h4>关于我</h4>
+            <span className="status">{userProfileStatus}</span>
+          </div>
           <div className="question-grid">
-            <div className="field-full">
-              <label htmlFor="user-name-for-role">角色如何称呼你</label>
-              <input
-                id="user-name-for-role"
-                onChange={(event) =>
-                  setQuestionnaire((current) => ({
-                    ...current,
-                    userNameForRole: event.target.value
-                  }))
-                }
-                placeholder="例如：admin、周一舟、哥哥、主人"
-                value={questionnaire.userNameForRole}
-              />
-            </div>
-
             <div className="field-full">
               <label>你的性格倾向</label>
               <div className="option-grid">
@@ -860,7 +1099,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                     <span className="option-title">{axisLabel(key, false)}</span>
                     <select
                       onChange={(event) => handleUserPersonalityChange(key, event.target.value)}
-                      value={questionnaire.userPersonality[key]}
+                      value={userProfile.userPersonality[key]}
                     >
                       {PERSONALITY_AXIS_OPTIONS[key].map((option) => (
                         <option key={option.value} value={option.value}>
@@ -874,7 +1113,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
               <textarea
                 onChange={(event) => handleUserPersonalityChange("otherNotes", event.target.value)}
                 placeholder="其他补充：比如社恐但熟了会很能聊，或很理性但会心软。"
-                value={questionnaire.userPersonality.otherNotes}
+                value={userProfile.userPersonality.otherNotes}
               />
               <div className="inline-note">
                 推测 MBTI：<strong>{inferredUserMbti}</strong>
@@ -883,28 +1122,65 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             </div>
 
             <ChoiceField
-              field={questionnaire.lifeStage}
+              field={userProfile.lifeStage}
               label="你现在的阶段"
-              onChange={(field, value) => handleSingleChoiceChange("lifeStage", field, value)}
+              onChange={(field, value) => handleUserSingleChoiceChange("lifeStage", field, value)}
               options={QUESTION_OPTIONS.lifeStage}
             />
 
             <ChoiceField
-              field={questionnaire.communicationPreference}
+              field={userProfile.communicationPreference}
               label="你更喜欢对方用什么方式和你沟通"
-              onChange={(field, value) => handleSingleChoiceChange("communicationPreference", field, value)}
+              onChange={(field, value) => handleUserSingleChoiceChange("communicationPreference", field, value)}
               options={QUESTION_OPTIONS.communicationPreference}
             />
+          </div>
+          <div className="footer-note">这里会自动保存，不需要单独点击保存按钮。</div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderRelationshipPanel() {
+    return (
+      <section className="panel">
+        <div className="panel-inner stack">
+          <div className="panel-title">
+            <div>
+              <h3>我们的关系</h3>
+              <p>这里是当前角色专属的关系设定，只会影响这个角色的生成结果。</p>
+            </div>
+          </div>
+
+          <div className="subsection-header">
+            <h4>关于我和 ta 的关系</h4>
+            <span className="status">这一部分只属于当前角色。</span>
+          </div>
+          <div className="question-grid">
+            <div className="field-full">
+              <label htmlFor="user-name-for-role">角色如何称呼你</label>
+              <input
+                id="user-name-for-role"
+                onChange={(event) =>
+                  setRelationshipQuestionnaire((current) => ({
+                    ...current,
+                    userNameForRole: event.target.value
+                  }))
+                }
+                placeholder="例如：admin、周一舟、哥哥、主人"
+                value={relationshipQuestionnaire.userNameForRole}
+              />
+            </div>
 
             <ChoiceField
-              field={questionnaire.desiredBond}
+              field={relationshipQuestionnaire.desiredBond}
               label="你希望你们之间是什么样的相处感觉"
-              onChange={(field, value) => handleSingleChoiceChange("desiredBond", field, value)}
+              onChange={(field, value) => handleRelationshipSingleChoiceChange("desiredBond", field, value)}
               options={QUESTION_OPTIONS.desiredBond}
             />
 
             <CheckboxField
-              field={questionnaire.treatmentPreference}
+              field={relationshipQuestionnaire.treatmentPreference}
               label="你更希望对方怎么对待你"
               onCustomChange={(value) => handleMultiChoiceCustomChange("treatmentPreference", value)}
               onToggle={(value) => handleMultiChoiceToggle("treatmentPreference", value)}
@@ -912,7 +1188,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             />
 
             <CheckboxField
-              field={questionnaire.specialTraits}
+              field={relationshipQuestionnaire.specialTraits}
               label="你愿意让角色带哪些属性"
               onCustomChange={(value) => handleMultiChoiceCustomChange("specialTraits", value)}
               onToggle={(value) => handleMultiChoiceToggle("specialTraits", value)}
@@ -920,13 +1196,13 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             />
 
             <div className="field-full">
-              <label htmlFor="favorability">初始好感值：{questionnaire.affectionPlan.initialFavorability}</label>
+              <label htmlFor="favorability">初始好感值：{relationshipQuestionnaire.affectionPlan.initialFavorability}</label>
               <input
                 id="favorability"
                 max={100}
                 min={0}
                 onChange={(event) =>
-                  setQuestionnaire((current) => ({
+                  setRelationshipQuestionnaire((current) => ({
                     ...current,
                     affectionPlan: {
                       ...current.affectionPlan,
@@ -935,7 +1211,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                   }))
                 }
                 type="range"
-                value={questionnaire.affectionPlan.initialFavorability}
+                value={relationshipQuestionnaire.affectionPlan.initialFavorability}
               />
               <div className="range-labels">
                 <span>陌生</span>
@@ -946,12 +1222,12 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
             <ChoiceField
               field={{
-                selected: questionnaire.affectionPlan.growthRoute,
-                custom: questionnaire.affectionPlan.growthRouteCustom
+                selected: relationshipQuestionnaire.affectionPlan.growthRoute,
+                custom: relationshipQuestionnaire.affectionPlan.growthRouteCustom
               }}
               label="好感值提升路线"
               onChange={(field, value) =>
-                setQuestionnaire((current) => ({
+                setRelationshipQuestionnaire((current) => ({
                   ...current,
                   affectionPlan: {
                     ...current.affectionPlan,
@@ -963,17 +1239,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             />
           </div>
 
-          <div className="actions">
-            <span className="status">问卷会跟随“保存角色和问卷”或“生成并预览角色信息”一起保存。</span>
-          </div>
-          <div className="footer-note">
-            <span className="status">问卷修改会在保存角色或生成角色信息时一并保存。</span>
-            <br />
-            生成后会返回角色详情页，查看结构化蓝图以及 `IDENTITY.md`、`SOUL.md`、`USER.md`、`MEMORY.md`
-            的内容。
-            <br />
-            <span className="status">{status}</span>
-          </div>
+          <div className="footer-note">这里的内容会在这一步的下一步里和角色信息一起保存并生成详情。</div>
         </div>
       </section>
     );
@@ -1059,7 +1325,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
-              <h2>{isEditingExisting ? "编辑角色" : "创建角色"}</h2>
+              <h2>角色信息</h2>
               <p>
                 {isEditingExisting
                   ? "修改基础信息、问卷或 Discord 绑定后，都可以单独保存。"
@@ -1166,8 +1432,15 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                   {draft.photos.map((photo, idx) => (
                     <img
                       alt="uploaded"
+                      data-fallback={selected ? characterAvatarSrc(selected) : ""}
                       key={`${photo}-${idx}`}
-                      src={photo}
+                      onError={(event) => {
+                        const fallback = event.currentTarget.dataset.fallback;
+                        if (fallback && event.currentTarget.src !== fallback) {
+                          event.currentTarget.src = fallback;
+                        }
+                      }}
+                      src={draftPhotoPreviewSrc(photo, idx)}
                     />
                   ))}
                 </div>
@@ -1183,171 +1456,239 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             {activePreset ? <span className="footer-note">建议节奏：{activePreset.rhythm}</span> : null}
           </div>
 
+          <div className="footer-note">先完成角色资料和问卷。点击下一步后会自动更新角色详情并同步 workspace。</div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderProfileStep() {
+    return (
+      <>
+        <section className="profile-step-grid">
+          {renderEditorPanel()}
+          <div className="profile-step-side">
+            {renderUserProfilePanel()}
+            {renderRelationshipPanel()}
+          </div>
+        </section>
+        <section className="panel">
+          <div className="panel-inner wizard-footer">
+            <div>
+              <h3>下一步</h3>
+              <p>保存角色信息和问卷，生成最新角色详情，并检查对应 workspace；有就更新，没有就创建。</p>
+            </div>
+            <div className="actions">
+              <button className="button-primary" disabled={isAdvancingProfile} onClick={handleProfileNext} type="button">
+                {isAdvancingProfile ? "处理中..." : "下一步：生成详情并同步 Workspace"}
+              </button>
+            </div>
+            <div className="workspace-feedback">
+              {workspaceStatus || "这一步不能跳过。点击下一步后会自动完成角色保存、蓝图生成和 workspace 同步。"}
+              <br />
+              {status}
+            </div>
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  function renderDiscordPanel() {
+    return (
+      <section className="panel">
+        <div className="panel-inner stack">
+          <div className="panel-title">
+            <div>
+              <h3>Discord 设置</h3>
+              <p>这里保存频道、用户和 bot token。可以直接下一步，也可以跳过。</p>
+            </div>
+          </div>
+
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="discord-guild-id">Server ID</label>
+              <input
+                id="discord-guild-id"
+                onChange={(event) => handleDiscordDraftChange("guildId", event.target.value)}
+                placeholder="可选；留空时会尝试从 Channel ID 自动解析"
+                value={discordLinkDraft.guildId ?? ""}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="discord-channel-id">Channel ID</label>
+              <input
+                id="discord-channel-id"
+                onChange={(event) => handleDiscordDraftChange("channelId", event.target.value)}
+                placeholder="OpenClaw 绑定目标频道；当前接管模式下频道内仍需 @mention"
+                value={discordLinkDraft.channelId}
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="discord-user-id">User ID</label>
+              <input
+                id="discord-user-id"
+                onChange={(event) => handleDiscordDraftChange("userId", event.target.value)}
+                placeholder="你的 Discord 用户 ID；只允许这个账号和角色交互"
+                value={discordLinkDraft.userId}
+              />
+            </div>
+
+            <div className="field-full">
+              <label htmlFor="discord-bot-token">Discord Login Token</label>
+              <input
+                id="discord-bot-token"
+                onChange={(event) => handleDiscordRuntimeConfigChange(event.target.value)}
+                placeholder="这只角色 bot 的登录 token"
+                type="password"
+                value={discordBotTokenDraft}
+              />
+            </div>
+          </div>
+
           <div className="actions">
-            <button className="button-primary" disabled={isSaving} onClick={handleCreate} type="button">
-              {isSaving ? (isEditingExisting ? "保存中..." : "创建中...") : isEditingExisting ? "保存角色和问卷" : "先创建角色"}
+            <button className="button-ghost" onClick={handleDiscordPrevious} type="button">
+              上一步
             </button>
-            <button className="button-secondary" disabled={isComposing} onClick={handleCompose} type="button">
-              {isComposing ? "生成中..." : "生成并预览角色信息"}
+            <button className="button-secondary" onClick={handleDiscordSkip} type="button">
+              Skip
             </button>
-            <span className="status">
-              {selected ? "保存按钮只更新角色和问卷；生成按钮会重新生成角色信息并跳回详情页。" : "可以先创建角色，或直接生成并预览角色信息。"}
-            </span>
+            <button className="button-primary" disabled={isSavingDiscord} onClick={handleDiscordNext} type="button">
+              {isSavingDiscord ? "保存中..." : "下一步"}
+            </button>
           </div>
 
-          <div className="stack-sm">
-            <h4>Discord 绑定</h4>
-            <div className="form-grid">
-              <div className="field">
-                <label htmlFor="discord-guild-id">Server ID</label>
-                <input
-                  id="discord-guild-id"
-                  onChange={(event) => handleDiscordDraftChange("guildId", event.target.value)}
-                  placeholder="可选；留空时会尝试从 Channel ID 自动解析"
-                  value={discordLinkDraft.guildId ?? ""}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="discord-channel-id">Channel ID</label>
-                <input
-                  id="discord-channel-id"
-                  onChange={(event) => handleDiscordDraftChange("channelId", event.target.value)}
-                  placeholder="OpenClaw 绑定目标频道；当前接管模式下频道内仍需 @mention"
-                  value={discordLinkDraft.channelId}
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="discord-user-id">User ID</label>
-                <input
-                  id="discord-user-id"
-                  onChange={(event) => handleDiscordDraftChange("userId", event.target.value)}
-                  placeholder="你的 Discord 用户 ID；只允许这个账号和角色交互"
-                  value={discordLinkDraft.userId}
-                />
-              </div>
-
-              <div className="field-full">
-                <label htmlFor="discord-bot-token">Discord Login Token</label>
-                <input
-                  id="discord-bot-token"
-                  onChange={(event) => handleDiscordRuntimeConfigChange(event.target.value)}
-                  placeholder="这只角色 bot 的登录 token"
-                  type="password"
-                  value={discordBotTokenDraft}
-                />
-              </div>
-            </div>
-            <div className="actions">
-              <button className="button-secondary" disabled={isSavingDiscord} onClick={handleSaveDiscordLink} type="button">
-                {isSavingDiscord ? "保存中..." : "保存 Discord 配置"}
-              </button>
-            </div>
-            <div className="workspace-feedback">
-              {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
-              <br />
-              {selected
-                ? `OpenClaw Discord Account ID：${selectedDiscordAccountId}${discordLinkDraft.botId ? ` · Bot User ID：${discordLinkDraft.botId}` : ""}`
-                : "先创建角色，再为这个角色保存专属 Discord 账号。"}
-              <br />
-              {discordStatus || "保存 Discord 配置后，同步 Workspace 即可完成 OpenClaw 注册，平台会自动管理 bot 运行和消息路由。"}
-
-            </div>
-          </div>
-
-          <div className="stack-sm">
-            <h4>TuQu AI 配置</h4>
-            <div className="form-grid">
-              <div className="field-full">
-                <label>注册/充值</label>
-                <a
-                  className="tuqu-registration-link"
-                  href={tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  {tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
-                </a>
-              </div>
-
-              <div className="field-full">
-                <label htmlFor="tuqu-service-key">Service Key</label>
-                <input
-                  id="tuqu-service-key"
-                  onChange={(event) => handleTuquConfigChange("serviceKey", event.target.value)}
-                  placeholder="明文保存的 TuQu AI Service Key"
-                  value={tuquConfigDraft.serviceKey}
-                />
-              </div>
-
-              <div className="field-full">
-                <label>TuQu AI Character ID</label>
-                <div className="tuqu-character-status-row">
-                  {tuquConfigDraft.characterId ? (
-                    <span className="pill" style={{ fontSize: "0.92rem" }}>
-                      已注册：{tuquConfigDraft.characterId}
-                    </span>
-                  ) : (
-                    <span className="pill warm" style={{ fontSize: "0.92rem" }}>尚未注册</span>
-                  )}
-                  <div className="tuqu-info-anchor">
-                    <button
-                      className="button-ghost tuqu-info-button"
-                      onClick={() => setShowTuquCharacterInfo((prev) => !prev)}
-                      type="button"
-                    >
-                      ?
-                    </button>
-                    {showTuquCharacterInfo && (
-                      <div className="tuqu-info-popover">
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <strong style={{ fontSize: "0.92rem" }}>什么是 TuQu Character？</strong>
-                          <button
-                            className="button-ghost"
-                            onClick={() => setShowTuquCharacterInfo(false)}
-                            style={{ padding: "4px 10px", fontSize: "0.82rem", borderRadius: "8px" }}
-                            type="button"
-                          >
-                            关闭
-                          </button>
-                        </div>
-                        <p style={{ margin: "8px 0 0", lineHeight: 1.6, fontSize: "0.9rem", color: "var(--muted)" }}>
-                          TuQu Character 是用指定角色的照片及特征介绍创建的一个参考用人物。创建后可以无限为该角色生成照片，而无需提供除了该角色 ID 之外的参数。
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="actions">
-              <button className="button-secondary" disabled={isSavingTuqu} onClick={handleSaveTuquConfig} type="button">
-                {isSavingTuqu ? "保存中..." : "保存 TuQu AI 配置"}
-              </button>
-              <button className="button-ghost" disabled={isCreatingTuquCharacter} onClick={handleCreateTuquCharacter} type="button">
-                {isCreatingTuquCharacter ? "创建中..." : "创建 TuQu AI Character"}
-              </button>
-            </div>
-            <div className="workspace-feedback">
-              {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
-              <br />
-              {tuquStatus || "这里会明文保存 TuQu AI Service Key，并同步到 workspace。"}
-            </div>
+          <div className="workspace-feedback">
+            {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
+            <br />
+            {selected
+              ? `OpenClaw Discord Account ID：${selectedDiscordAccountId}${discordLinkDraft.botId ? ` · Bot User ID：${discordLinkDraft.botId}` : ""}`
+              : "先完成第一步，再为这个角色保存 Discord 配置。"}
+            <br />
+            {discordStatus || "点“下一步”会保存 Discord 配置；点“Skip”会直接跳过这一项。"}
           </div>
         </div>
       </section>
     );
   }
 
-  function renderDetailPanel() {
+  function renderTuquPanel() {
+    return (
+      <section className="panel">
+        <div className="panel-inner stack">
+          <div className="panel-title">
+            <div>
+              <h3>TuQu 设置</h3>
+              <p>保存 TuQu Service Key 和角色 ID。完成后会回到主页。</p>
+            </div>
+          </div>
+
+          <div className="form-grid">
+            <div className="field-full">
+              <label>注册/充值</label>
+              <a
+                className="tuqu-registration-link"
+                href={tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                {tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+              </a>
+            </div>
+
+            <div className="field-full">
+              <label htmlFor="tuqu-service-key">Service Key</label>
+              <input
+                id="tuqu-service-key"
+                onChange={(event) => handleTuquConfigChange("serviceKey", event.target.value)}
+                placeholder="明文保存的 TuQu AI Service Key"
+                value={tuquConfigDraft.serviceKey}
+              />
+            </div>
+
+            <div className="field-full">
+              <label>TuQu AI Character ID</label>
+              <div className="tuqu-character-status-row">
+                {tuquConfigDraft.characterId ? (
+                  <span className="pill" style={{ fontSize: "0.92rem" }}>
+                    已注册：{tuquConfigDraft.characterId}
+                  </span>
+                ) : (
+                  <span className="pill warm" style={{ fontSize: "0.92rem" }}>
+                    尚未注册
+                  </span>
+                )}
+                <div className="tuqu-info-anchor">
+                  <button
+                    className="button-ghost tuqu-info-button"
+                    onClick={() => setShowTuquCharacterInfo((prev) => !prev)}
+                    type="button"
+                  >
+                    ?
+                  </button>
+                  {showTuquCharacterInfo && (
+                    <div className="tuqu-info-popover">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong style={{ fontSize: "0.92rem" }}>什么是 TuQu Character？</strong>
+                        <button
+                          className="button-ghost"
+                          onClick={() => setShowTuquCharacterInfo(false)}
+                          style={{ padding: "4px 10px", fontSize: "0.82rem", borderRadius: "8px" }}
+                          type="button"
+                        >
+                          关闭
+                        </button>
+                      </div>
+                      <p style={{ margin: "8px 0 0", lineHeight: 1.6, fontSize: "0.9rem", color: "var(--muted)" }}>
+                        TuQu Character 是用指定角色的照片及特征介绍创建的一个参考用人物。创建后可以无限为该角色生成照片，而无需提供除了该角色 ID 之外的参数。
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="actions">
+            <button className="button-ghost" onClick={handleTuquPrevious} type="button">
+              上一步
+            </button>
+            <button className="button-secondary" onClick={handleTuquSkip} type="button">
+              Skip
+            </button>
+            <button className="button-ghost" disabled={isCreatingTuquCharacter} onClick={handleCreateTuquCharacter} type="button">
+              {isCreatingTuquCharacter ? "创建中..." : "创建 TuQu AI Character"}
+            </button>
+            <button className="button-primary" disabled={isSavingTuqu} onClick={handleTuquFinish} type="button">
+              {isSavingTuqu ? "保存中..." : "完成设置"}
+            </button>
+          </div>
+
+          <div className="workspace-feedback">
+            {selected?.workspacePath ? `当前 workspace：${selected.workspacePath}` : "当前角色还没有 workspace。"}
+            <br />
+            {tuquStatus || "点“完成设置”会保存 TuQu 配置并返回主页；点“Skip”会直接结束流程。"}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderDetailPanel(mode: "browse" | "wizard" = "browse") {
+    const isWizardMode = mode === "wizard";
+    const activeRelationshipQuestionnaire = isWizardMode
+      ? relationshipQuestionnaire
+      : selected?.questionnaire ?? initialRelationshipQuestionnaire;
+
     return (
       <section className="panel">
         <div className="panel-inner">
           <div className="panel-title">
             <div>
               <h3>角色详情</h3>
-              <p>生成后会看到结构化蓝图和可继续编辑的角色信息。</p>
+              <p>{isWizardMode ? "检查生成结果，必要时修改 markdown，再继续下一步。" : "生成后会看到结构化蓝图和可继续编辑的角色信息。"}</p>
             </div>
           </div>
 
@@ -1425,7 +1766,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
 
                   <div>
                     <h4>如何称呼用户</h4>
-                    <p>{questionnaire.userNameForRole || selected.blueprintPackage.relationship.userAddressingStyle || "未设定"}</p>
+                    <p>{activeRelationshipQuestionnaire.userNameForRole || selected.blueprintPackage.relationship.userAddressingStyle || "未设定"}</p>
                   </div>
 
                   <div>
@@ -1492,31 +1833,41 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
                   </div>
 
                   <div className="actions">
-                    <button
-                      className="button-secondary"
-                      disabled={isSavingBlueprintFiles}
-                      onClick={handleSaveBlueprintFiles}
-                      type="button"
-                    >
-                      {isSavingBlueprintFiles ? "保存中..." : "保存 Markdown 文件"}
-                    </button>
+                    {isWizardMode ? (
+                      <>
+                        <button className="button-ghost" onClick={handleDetailsPrevious} type="button">
+                          上一步
+                        </button>
+                        <button
+                          className="button-primary"
+                          disabled={isSavingBlueprintFiles}
+                          onClick={handleDetailsNext}
+                          type="button"
+                        >
+                          {isSavingBlueprintFiles ? "保存中..." : "下一步"}
+                        </button>
+                      </>
+                    ) : (
                       <button
-                        className="button-primary"
-                        disabled={isCreatingWorkspace}
-                        onClick={handleCreateWorkspace}
+                        className="button-secondary"
+                        disabled={isSavingBlueprintFiles}
+                        onClick={handleSaveBlueprintFiles}
                         type="button"
                       >
-                        {isCreatingWorkspace ? "同步中..." : "同步 OpenClaw Workspace"}
+                        {isSavingBlueprintFiles ? "保存中..." : "保存 Markdown 文件"}
                       </button>
-                    </div>
-                    <div className="workspace-feedback">
-                      {blueprintFilesStatus || "这里的四个 Markdown 文件可以直接手动编辑。保存后会覆盖角色包里的最终内容。"}
-                      <br />
-                      {workspaceStatus || "同步成功后，这里会显示 workspace 路径。已有 workspace 也会被当前角色包内容覆盖更新。"}
-                    </div>
+                    )}
+                  </div>
+                  <div className="workspace-feedback">
+                    {blueprintFilesStatus || "这里的四个 Markdown 文件可以直接手动编辑。保存后会覆盖角色包里的最终内容。"}
+                    <br />
+                    {selected.workspacePath ? `当前 workspace：${selected.workspacePath}` : workspaceStatus || "完成第一步后会自动创建并同步 workspace。"}
+                  </div>
                 </>
               ) : (
-                <div className="empty-state">这个角色还没有生成角色信息。完成编辑后点“生成并预览角色信息”。</div>
+                <div className="empty-state">
+                  这个角色还没有生成角色信息。先回到上一步，保存基础信息并生成角色详情。
+                </div>
               )}
             </div>
           ) : (
@@ -1579,13 +1930,43 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             ) : null}
             <div>
               <strong>{selected ? `正在编辑：${selected.name}` : "正在创建新角色"}</strong>
-              <div className="status">保存后可返回角色页查看详情。</div>
+              <div className="status">{currentEditorStepMeta.title} · {currentEditorStepMeta.description}</div>
             </div>
           </div>
-          <section className="panel-grid">
-            {renderEditorPanel()}
-            {renderQuestionnairePanel()}
+          <section className="panel">
+            <div className="panel-inner stack">
+              <div className="panel-title">
+                <div>
+                  <h3>设置流程</h3>
+                  <p>按顺序完成角色创建、详情修订、Discord 和 TuQu 配置。</p>
+                </div>
+              </div>
+              <div className="stepper">
+                {EDITOR_STEPS.map((step, index) => (
+                  <button
+                    className="stepper-item"
+                    data-active={step.key === editorStep}
+                    data-clickable={canJumpToAnyStep}
+                    data-complete={index < currentEditorStepIndex}
+                    disabled={!canJumpToAnyStep}
+                    key={step.key}
+                    onClick={() => handleStepCardClick(step.key)}
+                    type="button"
+                  >
+                    <span className="stepper-index">{index + 1}</span>
+                    <div>
+                      <strong>{step.title}</strong>
+                      <span>{step.description}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </section>
+          {editorStep === "profile" ? renderProfileStep() : null}
+          {editorStep === "details" ? renderDetailPanel("wizard") : null}
+          {editorStep === "discord" ? renderDiscordPanel() : null}
+          {editorStep === "tuqu" ? renderTuquPanel() : null}
         </section>
       )}
 
@@ -1595,7 +1976,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
             <div>
               <h2>Discord Bots</h2>
               <p>
-                保存 Discord 配置并同步 Workspace 后，OpenClaw 会自动接管所有角色 bot 的运行和 @mention 路由。
+                在设置流程里保存 Discord 配置后，OpenClaw 会自动接管所有角色 bot 的运行和 @mention 路由。
                 <br />
                 下方的本地启动仅用于调试，直接在 Designer 进程内运行 bot，不经过 OpenClaw。
               </p>
@@ -1605,7 +1986,7 @@ export function DesignerApp({ initialCharacters }: DesignerAppProps) {
           <div className="workspace-feedback">
             {savedDiscordAccounts.length
               ? savedDiscordAccounts.map((account) => `${account.characterName ?? account.accountId}: 已注册`).join(" | ")
-              : "还没有保存任何角色级 Discord 账号。先在角色详情里保存 Discord 配置，再同步 Workspace。"}
+              : "还没有保存任何角色级 Discord 账号。先进入编辑流程完成 Discord 设置。"}
           </div>
 
           <details>

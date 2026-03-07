@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createCharacter, deleteCharacter, listCharacters, updateCharacter, updateCharacterFromDraft } from "@/lib/data";
-import { BlueprintPackage, DiscordLink, DraftCharacterInput, QuestionnaireInput } from "@/lib/types";
+import {
+  BlueprintPackage,
+  DiscordLink,
+  DraftCharacterInput,
+  RelationshipQuestionnaireInput
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -10,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const payload = (await request.json()) as DraftCharacterInput & { questionnaire?: QuestionnaireInput };
+  const payload = (await request.json()) as DraftCharacterInput & { questionnaire?: RelationshipQuestionnaireInput };
 
   if (!payload.name?.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -21,7 +26,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const payload = (await request.json()) as DraftCharacterInput & { id?: string; questionnaire?: QuestionnaireInput };
+  const payload = (await request.json()) as DraftCharacterInput & { id?: string; questionnaire?: RelationshipQuestionnaireInput };
 
   if (!payload.id) {
     return NextResponse.json({ error: "Character id is required" }, { status: 400 });
@@ -45,7 +50,7 @@ export async function PUT(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const payload = (await request.json()) as {
     id?: string;
-    questionnaire?: QuestionnaireInput;
+    questionnaire?: RelationshipQuestionnaireInput;
     blueprintPackage?: BlueprintPackage;
     discordLink?: DiscordLink;
     workspacePath?: string;

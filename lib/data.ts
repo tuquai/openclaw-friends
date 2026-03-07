@@ -9,14 +9,17 @@ import {
   DiscordLink,
   DraftCharacterInput,
   PersonalityAxes,
+  RelationshipQuestionnaireInput,
   TuquConfig,
-  QuestionnaireInput
+  QuestionnaireInput,
+  UserProfileInput
 } from "@/lib/types";
 import { readWorkspaceCharacterRecords, writeCharacterRecord } from "@/lib/workspace";
 
 const dataDir = path.join(process.cwd(), "data");
 const uploadDir = path.join(process.cwd(), "public", "uploads");
 const dataFile = path.join(dataDir, "characters.json");
+const userProfileFile = path.join(dataDir, "user-profile.json");
 const openclawWorkspaceRoot = process.env.OPENCLAW_WORKSPACE_ROOT ?? path.join(os.homedir(), ".openclaw");
 const defaultTuquRegistrationUrl = "https://billing.tuqu.ai/dream-weaver/login";
 
@@ -277,7 +280,7 @@ function normalizeTuquConfig(raw: unknown): TuquConfig | undefined {
   };
 }
 
-function defaultQuestionnaire(): QuestionnaireInput {
+function defaultUserProfile(): UserProfileInput {
   const userPersonality = {
     socialEnergy: PERSONALITY_AXIS_OPTIONS.socialEnergy[1].value,
     informationFocus: PERSONALITY_AXIS_OPTIONS.informationFocus[0].value,
@@ -287,11 +290,16 @@ function defaultQuestionnaire(): QuestionnaireInput {
   };
 
   return {
-    userNameForRole: "",
     userMbti: inferMbtiFromAxes(userPersonality),
     userPersonality,
     lifeStage: { selected: QUESTION_OPTIONS.lifeStage[3], custom: "" },
-    communicationPreference: { selected: QUESTION_OPTIONS.communicationPreference[0], custom: "" },
+    communicationPreference: { selected: QUESTION_OPTIONS.communicationPreference[0], custom: "" }
+  };
+}
+
+function defaultRelationshipQuestionnaire(): RelationshipQuestionnaireInput {
+  return {
+    userNameForRole: "",
     desiredBond: { selected: QUESTION_OPTIONS.desiredBond[0], custom: "" },
     treatmentPreference: { selected: [QUESTION_OPTIONS.treatmentPreference[0]], custom: "" },
     specialTraits: { selected: [QUESTION_OPTIONS.specialTraits[0]], custom: "" },
@@ -303,12 +311,11 @@ function defaultQuestionnaire(): QuestionnaireInput {
   };
 }
 
-function normalizeQuestionnaire(raw?: Partial<QuestionnaireInput>): QuestionnaireInput {
-  const fallback = defaultQuestionnaire();
+function normalizeUserProfile(raw?: Partial<UserProfileInput | QuestionnaireInput>): UserProfileInput {
+  const fallback = defaultUserProfile();
   const userPersonality = normalizePersonality(raw?.userPersonality, raw?.userMbti ?? fallback.userMbti);
 
   return {
-    userNameForRole: raw?.userNameForRole?.trim() || fallback.userNameForRole,
     userMbti: inferMbtiFromAxes(userPersonality),
     userPersonality,
     lifeStage: {
@@ -318,7 +325,17 @@ function normalizeQuestionnaire(raw?: Partial<QuestionnaireInput>): Questionnair
     communicationPreference: {
       selected: raw?.communicationPreference?.selected ?? fallback.communicationPreference.selected,
       custom: raw?.communicationPreference?.custom ?? ""
-    },
+    }
+  };
+}
+
+function normalizeRelationshipQuestionnaire(
+  raw?: Partial<RelationshipQuestionnaireInput | QuestionnaireInput>
+): RelationshipQuestionnaireInput {
+  const fallback = defaultRelationshipQuestionnaire();
+
+  return {
+    userNameForRole: raw?.userNameForRole?.trim() || fallback.userNameForRole,
     desiredBond: {
       selected: raw?.desiredBond?.selected ?? fallback.desiredBond.selected,
       custom: raw?.desiredBond?.custom ?? ""
@@ -342,6 +359,16 @@ function normalizeQuestionnaire(raw?: Partial<QuestionnaireInput>): Questionnair
   };
 }
 
+export function mergeQuestionnaire(
+  userProfile?: Partial<UserProfileInput>,
+  relationshipQuestionnaire?: Partial<RelationshipQuestionnaireInput>
+): QuestionnaireInput {
+  return {
+    ...normalizeUserProfile(userProfile),
+    ...normalizeRelationshipQuestionnaire(relationshipQuestionnaire)
+  };
+}
+
 async function ensureStorage() {
   await fs.mkdir(dataDir, { recursive: true });
   await fs.mkdir(uploadDir, { recursive: true });
@@ -360,6 +387,22 @@ async function ensureStorage() {
     }
   } catch {
     // Keep the existing file untouched if it is malformed; a later read will surface the real error.
+  }
+
+  try {
+    await fs.access(userProfileFile);
+  } catch {
+    let migratedUserProfile = defaultUserProfile();
+
+    try {
+      const rawCharacters = JSON.parse(await fs.readFile(dataFile, "utf8")) as LegacyCharacterRecord[];
+      const legacyQuestionnaire = rawCharacters.find((record) => record.questionnaire)?.questionnaire;
+      migratedUserProfile = normalizeUserProfile(legacyQuestionnaire);
+    } catch {
+      // Ignore migration failure and fall back to defaults.
+    }
+
+    await fs.writeFile(userProfileFile, JSON.stringify(migratedUserProfile, null, 2), "utf8");
   }
 }
 
@@ -423,7 +466,7 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     photos: Array.isArray(raw.photos) ? raw.photos : [],
     createdAt: raw.createdAt ?? new Date().toISOString(),
     updatedAt: raw.updatedAt ?? new Date().toISOString(),
-    questionnaire: normalizeQuestionnaire(raw.questionnaire),
+    questionnaire: normalizeRelationshipQuestionnaire(raw.questionnaire),
     blueprintPackage: normalizeBlueprintPackage(raw.blueprintPackage),
     discordLink: discordLink
       ? {
@@ -561,6 +604,17 @@ async function writeLocalCharacters(characters: CharacterRecord[]) {
   await fs.writeFile(dataFile, JSON.stringify(characters, null, 2), "utf8");
 }
 
+async function readStoredUserProfile(): Promise<UserProfileInput> {
+  await ensureStorage();
+  const raw = JSON.parse(await fs.readFile(userProfileFile, "utf8")) as Partial<UserProfileInput | QuestionnaireInput>;
+  return normalizeUserProfile(raw);
+}
+
+async function writeStoredUserProfile(userProfile: UserProfileInput) {
+  await ensureStorage();
+  await fs.writeFile(userProfileFile, JSON.stringify(userProfile, null, 2), "utf8");
+}
+
 async function readCharacters() {
   const workspaceRecords = await readWorkspaceCharacterRecords();
   const workspaceCharacters = await Promise.all(
@@ -609,17 +663,27 @@ export async function listCharacters() {
   return readCharacters();
 }
 
+export async function getUserProfile() {
+  return readStoredUserProfile();
+}
+
+export async function updateUserProfile(userProfile?: Partial<UserProfileInput>) {
+  const normalized = normalizeUserProfile(userProfile);
+  await writeStoredUserProfile(normalized);
+  return normalized;
+}
+
 export async function getCharacter(id: string) {
   const characters = await readCharacters();
   return characters.find((character) => character.id === id) ?? null;
 }
 
-export async function createCharacter(input: DraftCharacterInput, questionnaire?: QuestionnaireInput) {
+export async function createCharacter(input: DraftCharacterInput, questionnaire?: RelationshipQuestionnaireInput) {
   const now = new Date().toISOString();
   const record: CharacterRecord = {
     id: crypto.randomUUID(),
     ...buildCharacterPatch(input),
-    questionnaire: normalizeQuestionnaire(questionnaire),
+    questionnaire: normalizeRelationshipQuestionnaire(questionnaire),
     createdAt: now,
     updatedAt: now
   };
@@ -657,10 +721,14 @@ export async function updateCharacter(id: string, patch: Partial<CharacterRecord
   return updated;
 }
 
-export async function updateCharacterFromDraft(id: string, input: DraftCharacterInput, questionnaire?: QuestionnaireInput) {
+export async function updateCharacterFromDraft(
+  id: string,
+  input: DraftCharacterInput,
+  questionnaire?: RelationshipQuestionnaireInput
+) {
   return updateCharacter(id, {
     ...buildCharacterPatch(input),
-    ...(questionnaire ? { questionnaire: normalizeQuestionnaire(questionnaire) } : {})
+    ...(questionnaire ? { questionnaire: normalizeRelationshipQuestionnaire(questionnaire) } : {})
   });
 }
 
