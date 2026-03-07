@@ -98,6 +98,38 @@ button {
   line-height: 1.6;
 }
 
+.hero-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.hero-language-picker {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(36, 43, 56, 0.08);
+}
+
+.hero-language-picker label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hero-language-picker select {
+  width: 100%;
+  border: 1px solid rgba(36, 43, 56, 0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
 .hero-grid {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;

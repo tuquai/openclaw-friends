@@ -2,6 +2,10 @@
   <img src="public/openclaw-friends-logo.png" alt="OpenClaw Friends" width="480" />
 </p>
 
+<p align="center">
+  中文 | <a href="./README.en.md">English</a> | <a href="./README.ja.md">日本語</a>
+</p>
+
 <h1 align="center">OpenClaw Friends — Character Designer</h1>
 
 <p align="center">
