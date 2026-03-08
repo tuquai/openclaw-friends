@@ -23,6 +23,12 @@
 
 ---
 
+## チュートリアル動画
+
+- Bilibili: [`BV1wkNMzsE5v`](https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click)
+
+---
+
 ## できること
 
 - ステップ形式でキャラを作成・編集

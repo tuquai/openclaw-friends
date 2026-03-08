@@ -27,8 +27,10 @@ import {
 import { APP_LANGUAGES, getLanguageLabel, t, translateOption } from "@/lib/i18n";
 
 type DesignerAppProps = {
+  githubUrl: string;
   initialCharacters: CharacterRecord[];
   initialUserProfile: UserProfileInput;
+  repoUpdatedAt: string;
 };
 
 type DesignerViewMode = "browse" | "edit";
@@ -103,6 +105,16 @@ const initialRelationshipQuestionnaire: RelationshipQuestionnaireInput = {
     growthRouteCustom: ""
   }
 };
+
+const DATE_LOCALES: Record<AppLanguage, string> = {
+  zh: "zh-CN",
+  en: "en-US",
+  ja: "ja-JP"
+};
+
+const TUTORIAL_VIDEO_LINKS = {
+  bilibili: "https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click"
+} as const;
 
 function safeList(value: string[] | undefined) {
   return Array.isArray(value) ? value : [];
@@ -184,6 +196,20 @@ function formatAgeLabel(language: AppLanguage, age: string) {
   return `${age} 岁`;
 }
 
+function formatRepoUpdatedAt(language: AppLanguage, value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(DATE_LOCALES[language], {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(date);
+}
+
 function isBrowserAccessiblePhoto(photo: string) {
   return (
     photo.startsWith("/") ||
@@ -193,7 +219,12 @@ function isBrowserAccessiblePhoto(photo: string) {
   );
 }
 
-export function DesignerApp({ initialCharacters, initialUserProfile: initialUserProfileProp }: DesignerAppProps) {
+export function DesignerApp({
+  githubUrl,
+  initialCharacters,
+  initialUserProfile: initialUserProfileProp,
+  repoUpdatedAt
+}: DesignerAppProps) {
   const [characters, setCharacters] = useState(initialCharacters);
   const [selectedId, setSelectedId] = useState(initialCharacters[0]?.id ?? "");
   const [viewMode, setViewMode] = useState<DesignerViewMode>(initialCharacters.length ? "browse" : "edit");
@@ -2053,6 +2084,56 @@ export function DesignerApp({ initialCharacters, initialUserProfile: initialUser
             </div>
             <h1>{t(uiLanguage, "hero.title")}</h1>
             <p>{t(uiLanguage, "hero.description")}</p>
+            <div className="hero-social-row">
+              <a
+                aria-label={t(uiLanguage, "hero.githubAria")}
+                className="github-cta"
+                href={githubUrl}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <span className="github-cta-icon" aria-hidden="true">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M12 1.5a10.5 10.5 0 00-3.32 20.46c.53.1.72-.23.72-.51 0-.25-.01-1.08-.02-1.96-2.95.64-3.57-1.25-3.57-1.25-.48-1.22-1.17-1.54-1.17-1.54-.96-.65.07-.64.07-.64 1.06.08 1.62 1.09 1.62 1.09.94 1.61 2.46 1.15 3.06.88.1-.68.37-1.15.67-1.41-2.36-.27-4.84-1.18-4.84-5.26 0-1.16.41-2.11 1.09-2.86-.11-.27-.47-1.36.1-2.84 0 0 .89-.29 2.9 1.09a10.1 10.1 0 015.28 0c2.01-1.38 2.9-1.09 2.9-1.09.57 1.48.21 2.57.1 2.84.68.75 1.09 1.7 1.09 2.86 0 4.09-2.49 4.99-4.86 5.25.38.33.72.98.72 1.97 0 1.42-.01 2.56-.01 2.91 0 .28.19.61.73.51A10.5 10.5 0 0012 1.5z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </span>
+                <span className="github-cta-copy">
+                  <strong>{t(uiLanguage, "hero.githubCta")}</strong>
+                  <span>{t(uiLanguage, "hero.githubHint")}</span>
+                </span>
+              </a>
+              <div className="hero-update-card">
+                <span className="hero-update-label">{t(uiLanguage, "hero.updatedLabel")}</span>
+                <strong>{formatRepoUpdatedAt(uiLanguage, repoUpdatedAt)}</strong>
+              </div>
+            </div>
+            <div className="hero-video-block">
+              <span className="hero-video-heading">{t(uiLanguage, "hero.videoLabel")}</span>
+              <div className="hero-video-row">
+                <a
+                  aria-label={`Bilibili · ${t(uiLanguage, "hero.videoBilibili")}`}
+                  className="tutorial-card"
+                  data-platform="bilibili"
+                  href={TUTORIAL_VIDEO_LINKS.bilibili}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  <span className="tutorial-card-icon" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M5 4.5v9L13 9 5 4.5z" fill="currentColor" />
+                    </svg>
+                  </span>
+                  <span className="tutorial-card-copy">
+                    <span className="tutorial-card-platform">Bilibili</span>
+                    <strong>{t(uiLanguage, "hero.videoBilibili")}</strong>
+                    <span>{t(uiLanguage, "hero.videoHint")}</span>
+                  </span>
+                </a>
+              </div>
+            </div>
             <div className="badge-row">
               <span className="badge">{t(uiLanguage, "badge.world")}</span>
               <span className="badge">{t(uiLanguage, "badge.mbti")}</span>

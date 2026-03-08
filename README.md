@@ -23,6 +23,12 @@
 
 ---
 
+## 教程视频
+
+- Bilibili：[`BV1wkNMzsE5v`](https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click)
+
+---
+
 ## 效果演示
 
 角色创建完成并注册到 OpenClaw 后，角色会以 Discord Bot 的身份出现在频道中。以下是 seed 角色**幸子**与用户在 Discord 中的真实对话：

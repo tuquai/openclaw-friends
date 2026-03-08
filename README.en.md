@@ -23,6 +23,12 @@
 
 ---
 
+## Tutorial Videos
+
+- Bilibili: [`BV1wkNMzsE5v`](https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click)
+
+---
+
 ## What It Does
 
 - Create and edit AI characters with a step-by-step setup flow
