@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { buildDiscordAccountId } from "@/lib/discord-account";
+import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { inferMbtiFromAxes, PERSONALITY_AXIS_OPTIONS, QUESTION_OPTIONS } from "@/lib/mbti";
 import {
   AppLanguage,
@@ -22,7 +23,10 @@ const dataDir = path.join(process.cwd(), "data");
 const uploadDir = path.join(process.cwd(), "public", "uploads");
 const dataFile = path.join(dataDir, "characters.json");
 const userProfileFile = path.join(dataDir, "user-profile.json");
-const openclawWorkspaceRoot = process.env.OPENCLAW_WORKSPACE_ROOT ?? path.join(os.homedir(), ".openclaw");
+const openclawWorkspaceRoot = resolveOptionalPathEnv(
+  process.env.OPENCLAW_WORKSPACE_ROOT,
+  path.join(os.homedir(), ".openclaw")
+);
 const defaultTuquRegistrationUrl = "https://billing.tuqu.ai/dream-weaver/login";
 
 const seedPersonality: PersonalityAxes = {
@@ -85,8 +89,6 @@ const seedCharacter: CharacterRecord = {
         "在细节里展示记忆力和偏好判断",
         "遇到轻微摩擦后还能继续接住彼此"
       ],
-      chemistry: ["她能接住情绪和审美话题", "关系推进感来自互动细节"],
-      friction: ["不会无边界迎合", "偶尔会按自己的判断吐槽"],
       userAddressingStyle: "自然叫名字，不故作亲密"
     },
     followups: {
@@ -236,8 +238,7 @@ function normalizeBlueprintPackage(raw: CharacterRecord["blueprintPackage"]): Bl
       ...raw.relationship,
       affectionBaseline: raw.relationship?.affectionBaseline ?? "初始好感信息缺失，建议重新生成角色包以补全关系起点。",
       affectionGrowthPath: toStringArray(raw.relationship?.affectionGrowthPath),
-      chemistry: toStringArray(raw.relationship?.chemistry),
-      friction: toStringArray(raw.relationship?.friction)
+      userAddressingStyle: raw.relationship?.userAddressingStyle ?? ""
     },
     followups: {
       ...raw.followups,
@@ -466,7 +467,7 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     heritage: raw.heritage ?? "",
     worldSetting: raw.worldSetting ?? "当代地球",
     concept: conceptParts.join("\n\n"),
-    mbti: raw.mbti ?? inferMbtiFromAxes(personality),
+    mbti: raw.mbti ?? undefined,
     personality,
     language: normalizeLanguage((raw as { language?: string }).language),
     photos: Array.isArray(raw.photos) ? raw.photos : [],
@@ -694,6 +695,7 @@ async function readCharacters() {
 
 function buildCharacterPatch(input: DraftCharacterInput): Omit<CharacterRecord, "id" | "createdAt" | "updatedAt"> {
   const personality = normalizePersonality(input.personality, input.mbti);
+  const mbti = input.mbti?.trim();
 
   return {
     name: input.name,
@@ -703,7 +705,7 @@ function buildCharacterPatch(input: DraftCharacterInput): Omit<CharacterRecord, 
     heritage: input.heritage,
     worldSetting: input.worldSetting,
     concept: input.concept,
-    mbti: input.mbti || inferMbtiFromAxes(personality),
+    mbti: mbti ? mbti : undefined,
     personality,
     language: normalizeLanguage(input.language),
     photos: input.photos,

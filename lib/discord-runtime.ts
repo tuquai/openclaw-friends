@@ -4,6 +4,7 @@ import path from "path";
 import { Client, Events, GatewayIntentBits, Message, Partials } from "discord.js";
 import { listCharacters } from "@/lib/data";
 import { listDiscordRuntimeAccounts, readDiscordRuntimeAccount } from "@/lib/discord-config";
+import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { generateDiscordReply, generateInCharacterError, generatePhotoScene, generateRechargeDecision } from "@/lib/openai";
 import { generateCharacterImage, generateFreestyleImage, TuquApiError, listRechargePlans, createWechatPayment, createStripePayment } from "@/lib/tuqu";
 import { AppLanguage, CharacterRecord, DiscordRuntimeAccountStatus, DiscordRuntimeStatus } from "@/lib/types";
@@ -26,7 +27,10 @@ const globalRuntime = globalThis as typeof globalThis & {
   __openclawDiscordRuntime?: RuntimeState;
 };
 const runtimeLockDir = path.join(process.cwd(), "data", "discord-runtime-locks");
-const openclawConfigPath = path.join(process.env.OPENCLAW_HOME ?? path.join(os.homedir(), ".openclaw"), "openclaw.json");
+const openclawConfigPath = path.join(
+  resolveOptionalPathEnv(process.env.OPENCLAW_HOME, path.join(os.homedir(), ".openclaw")),
+  "openclaw.json"
+);
 
 const INITIAL_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 120_000;

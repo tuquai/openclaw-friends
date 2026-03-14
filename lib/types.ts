@@ -80,7 +80,7 @@ export type BlueprintPackage = {
     heritage: string;
     worldSetting: string;
     concept: string;
-    mbti: string;
+    mbti?: string;
     coreTraits: string[];
     speakingStyle: string[];
     emotionalHabits: string[];
@@ -92,8 +92,6 @@ export type BlueprintPackage = {
     backstory: string;
     affectionBaseline: string;
     affectionGrowthPath: string[];
-    chemistry: string[];
-    friction: string[];
     userAddressingStyle: string;
   };
   followups: {
@@ -117,7 +115,7 @@ export type CharacterRecord = {
   heritage: string;
   worldSetting: string;
   concept: string;
-  mbti: string;
+  mbti?: string;
   personality: PersonalityAxes;
   language: AppLanguage;
   photos: string[];
@@ -139,7 +137,7 @@ export type DraftCharacterInput = {
   heritage: string;
   worldSetting: string;
   concept: string;
-  mbti: string;
+  mbti?: string;
   personality: PersonalityAxes;
   language: AppLanguage;
   photos: string[];

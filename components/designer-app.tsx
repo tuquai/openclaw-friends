@@ -86,7 +86,6 @@ function buildInitialDraft(language: AppLanguage): DraftCharacterInput {
     heritage: "",
     worldSetting: "当代地球",
     concept: "",
-    mbti: inferMbtiFromAxes(defaultCharacterPersonality),
     personality: defaultCharacterPersonality,
     language,
     photos: [],
@@ -115,6 +114,8 @@ const DATE_LOCALES: Record<AppLanguage, string> = {
 const TUTORIAL_VIDEO_LINKS = {
   bilibili: "https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click"
 } as const;
+
+const HERO_GALLERY = ["/chat1.jpg", "/chat2.jpg", "/chat3.jpg"] as const;
 
 function safeList(value: string[] | undefined) {
   return Array.isArray(value) ? value : [];
@@ -163,6 +164,16 @@ function characterPreview(character: CharacterRecord, language: AppLanguage) {
 function characterAvatarSrc(character: Pick<CharacterRecord, "id" | "updatedAt">) {
   const query = character.updatedAt ? `?v=${encodeURIComponent(character.updatedAt)}` : "";
   return `/api/characters/${character.id}/avatar${query}`;
+}
+
+function resolveCharacterMbti(character: { mbti?: string; personality: DraftCharacterInput["personality"] }) {
+  const explicit = character.mbti?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const inferred = inferMbtiFromAxes(character.personality);
+  return inferred.includes("X") ? "" : inferred;
 }
 
 function snapshotDraft(input: DraftCharacterInput) {
@@ -227,7 +238,7 @@ export function DesignerApp({
 }: DesignerAppProps) {
   const [characters, setCharacters] = useState(initialCharacters);
   const [selectedId, setSelectedId] = useState(initialCharacters[0]?.id ?? "");
-  const [viewMode, setViewMode] = useState<DesignerViewMode>(initialCharacters.length ? "browse" : "edit");
+  const [viewMode, setViewMode] = useState<DesignerViewMode>("browse");
   const [editorStep, setEditorStep] = useState<EditorStep>("profile");
   const [draft, setDraft] = useState(() => buildInitialDraft(initialUserProfileProp.language));
   const [userProfile, setUserProfile] = useState(initialUserProfileProp);
@@ -285,18 +296,27 @@ export function DesignerApp({
   const selectedDiscordAccountId = selected ? buildDiscordAccountId(selected.name, selected.id) : "";
   const savedDiscordAccounts = Object.values(discordRuntimeConfig.accounts);
   const isEditingExisting = Boolean(selected);
-  const inferredCharacterMbti = inferMbtiFromAxes(draft.personality);
+  const inferredCharacterMbti = resolveCharacterMbti(draft);
   const inferredUserMbti = inferMbtiFromAxes(userProfile.userPersonality);
   const activePreset = summarizeMbti(inferredCharacterMbti);
   const activeUserPreset = summarizeMbti(inferredUserMbti);
+  const selectedMbti = selected ? resolveCharacterMbti(selected) : "";
   const coreTraits = safeList(selected?.blueprintPackage?.character.coreTraits);
   const speakingStyle = safeList(selected?.blueprintPackage?.character.speakingStyle);
+  const emotionalHabits = safeList(selected?.blueprintPackage?.character.emotionalHabits);
+  const topicPreferences = safeList(selected?.blueprintPackage?.character.topicPreferences);
   const affectionGrowthPath = safeList(selected?.blueprintPackage?.relationship.affectionGrowthPath);
-  const chemistry = safeList(selected?.blueprintPackage?.relationship.chemistry);
   const hardBoundaries = safeList(selected?.blueprintPackage?.character.hardBoundaries);
+  const confidenceNotes = safeList(selected?.blueprintPackage?.summary.confidenceNotes);
+  const missingButUseful = safeList(selected?.blueprintPackage?.followups.missingButUseful);
   const optionalDeepeningQuestions = safeList(
     selected?.blueprintPackage?.followups.optionalDeepeningQuestions
   );
+  const workspaceReadyCount = characters.filter((character) => Boolean(character.workspacePath)).length;
+  const blueprintReadyCount = characters.filter((character) => Boolean(character.blueprintPackage)).length;
+  const discordReadyCount = characters.filter((character) =>
+    Boolean(character.discordLink?.channelId && character.discordLink.userId)
+  ).length;
   const currentEditorStepIndex = editorSteps.findIndex((step) => step.key === editorStep);
   const currentEditorStepMeta = editorSteps[currentEditorStepIndex] ?? editorSteps[0];
   const currentDraftSnapshot = snapshotDraft(serializedDraft());
@@ -439,7 +459,7 @@ export function DesignerApp({
   function handleCharacterPersonalityChange(key: keyof DraftCharacterInput["personality"], value: string) {
     setDraft((current) => {
       const personality = { ...current.personality, [key]: value };
-      return { ...current, personality, mbti: inferMbtiFromAxes(personality) };
+      return { ...current, personality };
     });
   }
 
@@ -550,10 +570,7 @@ export function DesignerApp({
   }
 
   function serializedDraft() {
-    return {
-      ...draft,
-      mbti: inferredCharacterMbti
-    };
+    return { ...draft };
   }
 
   function serializedQuestionnaire() {
@@ -1209,7 +1226,7 @@ export function DesignerApp({
 
   function renderUserProfilePanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-subtle">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -1277,7 +1294,7 @@ export function DesignerApp({
 
   function renderRelationshipPanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-subtle">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -1389,7 +1406,7 @@ export function DesignerApp({
 
   function renderCharactersPanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-library">
         <div className="panel-inner">
           <div className="panel-title">
             <div>
@@ -1406,43 +1423,69 @@ export function DesignerApp({
             </div>
           </div>
 
+          <div className="library-overview">
+            <div className="library-stat">
+              <span>{t(uiLanguage, "list.total")}</span>
+              <strong>{characters.length}</strong>
+            </div>
+            <div className="library-stat">
+              <span>{t(uiLanguage, "list.workspaceReady")}</span>
+              <strong>{workspaceReadyCount}</strong>
+            </div>
+            <div className="library-stat">
+              <span>{t(uiLanguage, "list.blueprintReady")}</span>
+              <strong>{blueprintReadyCount}</strong>
+            </div>
+            <div className="library-stat">
+              <span>{t(uiLanguage, "list.discordReady")}</span>
+              <strong>{discordReadyCount}</strong>
+            </div>
+          </div>
+
           <div className="character-list">
             {characters.map((character) => (
-              <div className="character-card-row" key={character.id}>
+              <article className="library-card-shell" key={character.id}>
                 <button
-                  className="character-card"
+                  className="library-card"
                   data-active={character.id === selectedId}
                   onClick={() => setSelectedId(character.id)}
                   type="button"
                 >
                   {character.photos[0] || character.workspacePath ? (
-                    <img alt={character.name} className="thumb" src={characterAvatarSrc(character)} />
+                    <img alt={character.name} className="library-card-thumb" src={characterAvatarSrc(character)} />
                   ) : (
-                    <div className="thumb thumb-placeholder">{character.name.slice(0, 1)}</div>
+                    <div className="library-card-thumb library-card-thumb-placeholder">{character.name.slice(0, 1)}</div>
                   )}
-                  <div style={{ textAlign: "left" }}>
-                    <strong>{character.name}</strong>
-                    <div className="meta-line">
+                  <div className="library-card-content">
+                    <div className="library-card-header">
+                      <div className="library-card-title-block">
+                        <strong>{character.name}</strong>
+                      </div>
+                      <span className="library-card-updated">
+                        {t(uiLanguage, "list.updated")} {formatRepoUpdatedAt(uiLanguage, character.updatedAt)}
+                      </span>
+                    </div>
+                    <div className="library-card-meta">
                       {character.age ? <span className="pill">{formatAgeLabel(uiLanguage, character.age)}</span> : null}
-                      {character.mbti ? <span className="pill">{character.mbti}</span> : null}
+                      {resolveCharacterMbti(character) ? <span className="pill">{resolveCharacterMbti(character)}</span> : null}
                       {character.occupation ? <span className="pill warm">{character.occupation}</span> : null}
                       <span className="pill">{getLanguageLabel(uiLanguage, character.language)}</span>
                       {character.discordLink ? <span className="pill">{t(uiLanguage, "pill.discordBound")}</span> : null}
                       {character.workspacePath ? <span className="pill">{t(uiLanguage, "pill.workspaceReady")}</span> : null}
                     </div>
-                    <p className="character-preview">{characterPreview(character, uiLanguage)}</p>
+                    <p className="library-card-preview">{characterPreview(character, uiLanguage)}</p>
                   </div>
                 </button>
-                <div className="card-actions">
+                <div className="library-card-actions">
                   <button
-                    className="button-ghost button-inline-action"
+                    className="button-ghost library-card-action"
                     onClick={() => startEditingCharacter(character.id)}
                     type="button"
                   >
                     {t(uiLanguage, "button.edit")}
                   </button>
                   <button
-                    className="button-danger button-inline-action"
+                    className="button-danger library-card-action"
                     disabled={isSaving}
                     onClick={() => handleDeleteCharacter(character.id, character.name)}
                     type="button"
@@ -1450,11 +1493,13 @@ export function DesignerApp({
                     {t(uiLanguage, "button.delete")}
                   </button>
                 </div>
-              </div>
+              </article>
             ))}
 
             {characters.length === 0 ? (
-              <div className="empty-state">{t(uiLanguage, "empty.noCharacters")}</div>
+              <div className="empty-state">
+                <p>{t(uiLanguage, "empty.noCharacters")}</p>
+              </div>
             ) : null}
           </div>
         </div>
@@ -1464,7 +1509,7 @@ export function DesignerApp({
 
   function renderEditorPanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-form">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -1639,7 +1684,7 @@ export function DesignerApp({
             {renderRelationshipPanel()}
           </div>
         </section>
-        <section className="panel">
+        <section className="panel panel-support">
           <div className="panel-inner wizard-footer">
             <div>
               <h3>{t(uiLanguage, "wizard.nextTitle")}</h3>
@@ -1663,7 +1708,7 @@ export function DesignerApp({
 
   function renderDiscordPanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-form">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -1753,7 +1798,7 @@ export function DesignerApp({
 
   function renderTuquPanel() {
     return (
-      <section className="panel">
+      <section className="panel panel-form">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -1860,7 +1905,7 @@ export function DesignerApp({
       : selected?.questionnaire ?? initialRelationshipQuestionnaire;
 
     return (
-      <section className="panel">
+      <section className={`panel panel-preview${isWizardMode ? " panel-preview-wizard" : ""}`}>
         <div className="panel-inner">
           <div className="panel-title">
             <div>
@@ -1871,145 +1916,251 @@ export function DesignerApp({
 
           {selected ? (
             <div className="detail-block">
-              <div>
-                <strong style={{ fontSize: "1.4rem" }}>{selected.name}</strong>
-                <div className="meta-line">
-                  {selected.age ? <span className="pill">{formatAgeLabel(uiLanguage, selected.age)}</span> : null}
-                  {selected.gender ? <span className="pill">{selected.gender}</span> : null}
-                  {selected.mbti ? <span className="pill warm">{selected.mbti}</span> : null}
-                  <span className="pill">{getLanguageLabel(uiLanguage, selected.language)}</span>
+              {!isWizardMode ? (
+                <div className="detail-command-bar">
+                  <div className="detail-status-row">
+                    <span className={`detail-status-pill${selected.blueprintPackage ? "" : " is-muted"}`}>
+                      {selected.blueprintPackage ? t(uiLanguage, "detail.statusBlueprintReady") : t(uiLanguage, "detail.statusBlueprintMissing")}
+                    </span>
+                    {selected.workspacePath ? (
+                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusWorkspaceReady")}</span>
+                    ) : null}
+                    {selected.discordLink?.channelId && selected.discordLink.userId ? (
+                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusDiscordReady")}</span>
+                    ) : null}
+                    {selected.tuquConfig?.characterId ? (
+                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusTuquReady")}</span>
+                    ) : null}
+                  </div>
+                  <div className="actions">
+                    <button className="button-ghost" onClick={() => startEditingCharacter(selected.id)} type="button">
+                      {t(uiLanguage, "button.edit")}
+                    </button>
+                    {selected.blueprintPackage ? (
+                      <button
+                        className="button-secondary"
+                        disabled={isSavingBlueprintFiles}
+                        onClick={handleSaveBlueprintFiles}
+                        type="button"
+                      >
+                        {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.saveMarkdown")}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="detail-hero">
+                {selected.photos[0] || selected.workspacePath ? (
+                  <img alt={selected.name} className="detail-hero-thumb" src={characterAvatarSrc(selected)} />
+                ) : (
+                  <div className="detail-hero-thumb detail-hero-placeholder" aria-hidden="true">
+                    {selected.name.slice(0, 1)}
+                  </div>
+                )}
+                <div className="detail-hero-copy">
+                  <strong>{selected.name}</strong>
+                  <div className="meta-line">
+                    {selected.age ? <span className="pill">{formatAgeLabel(uiLanguage, selected.age)}</span> : null}
+                    {selected.gender ? <span className="pill">{selected.gender}</span> : null}
+                    {selectedMbti ? <span className="pill warm">{selectedMbti}</span> : null}
+                    <span className="pill">{getLanguageLabel(uiLanguage, selected.language)}</span>
+                  </div>
+                  <p>{characterPreview(selected, uiLanguage)}</p>
                 </div>
               </div>
 
-              <div>
-                <h4>{t(uiLanguage, "detail.basicInfo")}</h4>
-                <p>
-                  {selected.occupation || t(uiLanguage, "detail.emptyOccupation")}
-                  {selected.heritage ? ` / ${selected.heritage}` : ""}
-                </p>
-                <p>{t(uiLanguage, "detail.worldSetting")}{selected.worldSetting || t(uiLanguage, "detail.emptyWorldSetting")}</p>
-                <p>{selected.concept || t(uiLanguage, "detail.emptyConcept")}</p>
-              </div>
+              <div className="detail-overview-grid">
+                <div className="detail-card detail-card-lead">
+                  <h4>{t(uiLanguage, "detail.summary")}</h4>
+                  {selected.blueprintPackage ? (
+                    <>
+                      <p>{selected.blueprintPackage.summary.oneLiner}</p>
+                      <p>{t(uiLanguage, "detail.archetype")}{selected.blueprintPackage.summary.archetype}</p>
+                      {confidenceNotes.length ? (
+                        <ul>
+                          {confidenceNotes.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p>{selected.concept || t(uiLanguage, "detail.emptyConcept")}</p>
+                  )}
+                </div>
 
-              <div>
-                <h4>{t(uiLanguage, "detail.personality")}</h4>
-                <p>
-                  {selected.mbti} · {translateOption(uiLanguage, selected.personality.socialEnergy)} /{" "}
-                  {translateOption(uiLanguage, selected.personality.informationFocus)} /{" "}
-                  {translateOption(uiLanguage, selected.personality.decisionStyle)} /{" "}
-                  {translateOption(uiLanguage, selected.personality.lifestylePace)}
-                </p>
-                {selected.personality.otherNotes ? <p>{selected.personality.otherNotes}</p> : null}
+                <div className="detail-card">
+                  <h4>{t(uiLanguage, "detail.basicInfo")}</h4>
+                  <p>
+                    {selected.occupation || t(uiLanguage, "detail.emptyOccupation")}
+                    {selected.heritage ? ` / ${selected.heritage}` : ""}
+                  </p>
+                  <p>{t(uiLanguage, "detail.worldSetting")}{selected.worldSetting || t(uiLanguage, "detail.emptyWorldSetting")}</p>
+                  <p>{selected.concept || t(uiLanguage, "detail.emptyConcept")}</p>
+                </div>
+
+                <div className="detail-card">
+                  <h4>{t(uiLanguage, "detail.personality")}</h4>
+                  <p>
+                    {[
+                      selectedMbti,
+                      `${translateOption(uiLanguage, selected.personality.socialEnergy)} / ${translateOption(uiLanguage, selected.personality.informationFocus)} / ${translateOption(uiLanguage, selected.personality.decisionStyle)} / ${translateOption(uiLanguage, selected.personality.lifestylePace)}`
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  {selected.personality.otherNotes ? <p>{selected.personality.otherNotes}</p> : null}
+                  {emotionalHabits.length ? (
+                    <>
+                      <h4>{t(uiLanguage, "detail.emotionalHabits")}</h4>
+                      <ul>
+                        {emotionalHabits.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="detail-card">
+                  <h4>{t(uiLanguage, "detail.addressing")}</h4>
+                  <p>{activeRelationshipQuestionnaire.userNameForRole || selected.blueprintPackage?.relationship.userAddressingStyle || t(uiLanguage, "detail.emptyAddressing")}</p>
+                  {topicPreferences.length ? (
+                    <>
+                      <h4>{t(uiLanguage, "detail.topicPreferences")}</h4>
+                      <ul>
+                        {topicPreferences.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                </div>
               </div>
 
               {selected.blueprintPackage ? (
                 <>
-                  <div>
-                    <h4>{t(uiLanguage, "detail.summary")}</h4>
-                    <p>{selected.blueprintPackage.summary.oneLiner}</p>
-                    <p>{t(uiLanguage, "detail.archetype")}{selected.blueprintPackage.summary.archetype}</p>
+                  <div className="detail-list-grid">
+                    <div className="detail-card">
+                      <h4>{t(uiLanguage, "detail.relationshipStory")}</h4>
+                      <p>{selected.blueprintPackage.relationship.backstory}</p>
+                      <p>{t(uiLanguage, "detail.relationshipDynamic")}{selected.blueprintPackage.relationship.dynamic}</p>
+                      <p>{t(uiLanguage, "detail.affectionBaseline")}{selected.blueprintPackage.relationship.affectionBaseline}</p>
+                    </div>
+
+                    {coreTraits.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.coreTraits")}</h4>
+                        <ul>
+                          {coreTraits.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {speakingStyle.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.speakingStyle")}</h4>
+                        <ul>
+                          {speakingStyle.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {affectionGrowthPath.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.affectionRoute")}</h4>
+                        <ul>
+                          {affectionGrowthPath.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {hardBoundaries.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.boundaries")}</h4>
+                        <ul>
+                          {hardBoundaries.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {missingButUseful.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.missingButUseful")}</h4>
+                        <ul>
+                          {missingButUseful.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {optionalDeepeningQuestions.length ? (
+                      <div className="detail-card">
+                        <h4>{t(uiLanguage, "detail.followups")}</h4>
+                        <ul>
+                          {optionalDeepeningQuestions.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </div>
 
-                  <div>
-                    <h4>{t(uiLanguage, "detail.coreTraits")}</h4>
-                    <ul>
-                      {coreTraits.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  <div className="detail-markdown-section">
+                    <div className="panel-title">
+                      <div>
+                        <h3>{t(uiLanguage, "detail.markdownTitle")}</h3>
+                        <p>{t(uiLanguage, "detail.markdownHint")}</p>
+                      </div>
+                    </div>
 
-                  <div>
-                    <h4>{t(uiLanguage, "detail.speakingStyle")}</h4>
-                    <ul>
-                      {speakingStyle.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
+                    <div className="detail-markdown-grid">
+                      <div>
+                        <h4>{t(uiLanguage, "detail.editIdentity")}</h4>
+                        <textarea
+                          className="markdown-editor"
+                          onChange={(event) => handleBlueprintFileChange("identityMd", event.target.value)}
+                          value={blueprintFilesDraft.identityMd}
+                        />
+                      </div>
 
-                  <div>
-                    <h4>{t(uiLanguage, "detail.relationshipStory")}</h4>
-                    <p>{selected.blueprintPackage.relationship.backstory}</p>
-                    <p>{t(uiLanguage, "detail.relationshipDynamic")}{selected.blueprintPackage.relationship.dynamic}</p>
-                    <p>{t(uiLanguage, "detail.affectionBaseline")}{selected.blueprintPackage.relationship.affectionBaseline}</p>
-                  </div>
+                      <div>
+                        <h4>{t(uiLanguage, "detail.editSoul")}</h4>
+                        <textarea
+                          className="markdown-editor"
+                          onChange={(event) => handleBlueprintFileChange("soulMd", event.target.value)}
+                          value={blueprintFilesDraft.soulMd}
+                        />
+                      </div>
 
-                  <div>
-                    <h4>{t(uiLanguage, "detail.affectionRoute")}</h4>
-                    <ul>
-                      {affectionGrowthPath.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
+                      <div>
+                        <h4>{t(uiLanguage, "detail.editUser")}</h4>
+                        <textarea
+                          className="markdown-editor"
+                          onChange={(event) => handleBlueprintFileChange("userMd", event.target.value)}
+                          value={blueprintFilesDraft.userMd}
+                        />
+                      </div>
 
-                  <div>
-                    <h4>{t(uiLanguage, "detail.addressing")}</h4>
-                    <p>{activeRelationshipQuestionnaire.userNameForRole || selected.blueprintPackage.relationship.userAddressingStyle || t(uiLanguage, "detail.emptyAddressing")}</p>
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.chemistry")}</h4>
-                    <ul>
-                      {chemistry.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.boundaries")}</h4>
-                    <ul>
-                      {hardBoundaries.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.followups")}</h4>
-                    <ul>
-                      {optionalDeepeningQuestions.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.editIdentity")}</h4>
-                    <textarea
-                      className="markdown-editor"
-                      onChange={(event) => handleBlueprintFileChange("identityMd", event.target.value)}
-                      value={blueprintFilesDraft.identityMd}
-                    />
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.editSoul")}</h4>
-                    <textarea
-                      className="markdown-editor"
-                      onChange={(event) => handleBlueprintFileChange("soulMd", event.target.value)}
-                      value={blueprintFilesDraft.soulMd}
-                    />
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.editUser")}</h4>
-                    <textarea
-                      className="markdown-editor"
-                      onChange={(event) => handleBlueprintFileChange("userMd", event.target.value)}
-                      value={blueprintFilesDraft.userMd}
-                    />
-                  </div>
-
-                  <div>
-                    <h4>{t(uiLanguage, "detail.editMemory")}</h4>
-                    <textarea
-                      className="markdown-editor"
-                      onChange={(event) => handleBlueprintFileChange("memoryMd", event.target.value)}
-                      value={blueprintFilesDraft.memoryMd}
-                    />
+                      <div>
+                        <h4>{t(uiLanguage, "detail.editMemory")}</h4>
+                        <textarea
+                          className="markdown-editor"
+                          onChange={(event) => handleBlueprintFileChange("memoryMd", event.target.value)}
+                          value={blueprintFilesDraft.memoryMd}
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="actions">
@@ -2027,16 +2178,7 @@ export function DesignerApp({
                           {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.next")}
                         </button>
                       </>
-                    ) : (
-                      <button
-                        className="button-secondary"
-                        disabled={isSavingBlueprintFiles}
-                        onClick={handleSaveBlueprintFiles}
-                        type="button"
-                      >
-                        {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.saveMarkdown")}
-                      </button>
-                    )}
+                    ) : null}
                   </div>
                   <div className="workspace-feedback">
                     {blueprintFilesStatus || t(uiLanguage, "detail.markdownHint")}
@@ -2049,7 +2191,9 @@ export function DesignerApp({
               )}
             </div>
           ) : (
-            <div className="empty-state">{t(uiLanguage, "empty.noSelectedCharacter")}</div>
+            <div className="empty-state">
+              <p>{characters.length === 0 ? t(uiLanguage, "empty.noCharacters") : t(uiLanguage, "empty.noSelectedCharacter")}</p>
+            </div>
           )}
         </div>
       </section>
@@ -2059,31 +2203,48 @@ export function DesignerApp({
   return (
     <main className="shell">
       <section className="hero">
+        <div className="hero-toolbar">
+          <div className="hero-language-picker">
+            <label htmlFor="ui-language">{t(uiLanguage, "language.ui")}</label>
+            <select
+              id="ui-language"
+              onChange={(event) =>
+                setUserProfile((current) => ({
+                  ...current,
+                  language: event.target.value as AppLanguage
+                }))
+              }
+              value={userProfile.language}
+            >
+              {APP_LANGUAGES.map((language) => (
+                <option key={language} value={language}>
+                  {getLanguageLabel(uiLanguage, language)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         <div className="hero-grid">
-          <div>
-            <div className="hero-toolbar">
-              <div className="hero-language-picker">
-                <label htmlFor="ui-language">{t(uiLanguage, "language.ui")}</label>
-                <select
-                  id="ui-language"
-                  onChange={(event) =>
-                    setUserProfile((current) => ({
-                      ...current,
-                      language: event.target.value as AppLanguage
-                    }))
-                  }
-                  value={userProfile.language}
-                >
-                  {APP_LANGUAGES.map((language) => (
-                    <option key={language} value={language}>
-                      {getLanguageLabel(uiLanguage, language)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+          <div className="hero-copy">
             <h1>{t(uiLanguage, "hero.title")}</h1>
             <p>{t(uiLanguage, "hero.description")}</p>
+            <div className="badge-row hero-badge-row">
+              <span className="badge">{t(uiLanguage, "badge.world")}</span>
+              <span className="badge">{t(uiLanguage, "badge.mbti")}</span>
+              <span className="badge">{t(uiLanguage, "badge.relationship")}</span>
+              <span className="badge">{t(uiLanguage, "badge.affection")}</span>
+              <a
+                className="badge discord-badge"
+                href="https://discord.gg/Y5EExWtP"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <svg width="20" height="16" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.3 37.3 0 0025.4.3a.2.2 0 00-.2-.1 58.4 58.4 0 00-14.7 4.6.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.2a58.9 58.9 0 0017.7 9 .2.2 0 00.3-.1 42.1 42.1 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.7.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.7 58.7 0 0070.7 45.7v-.2c1.4-15.2-2.4-28.4-10-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.3 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1z" fill="currentColor"/>
+                </svg>
+                {t(uiLanguage, "badge.discord")}
+              </a>
+            </div>
             <div className="hero-social-row">
               <a
                 aria-label={t(uiLanguage, "hero.githubAria")}
@@ -2109,52 +2270,53 @@ export function DesignerApp({
                 <span className="hero-update-label">{t(uiLanguage, "hero.updatedLabel")}</span>
                 <strong>{formatRepoUpdatedAt(uiLanguage, repoUpdatedAt)}</strong>
               </div>
-            </div>
-            <div className="hero-video-block">
-              <span className="hero-video-heading">{t(uiLanguage, "hero.videoLabel")}</span>
-              <div className="hero-video-row">
-                <a
-                  aria-label={`Bilibili · ${t(uiLanguage, "hero.videoBilibili")}`}
-                  className="tutorial-card"
-                  data-platform="bilibili"
-                  href={TUTORIAL_VIDEO_LINKS.bilibili}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  <span className="tutorial-card-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M5 4.5v9L13 9 5 4.5z" fill="currentColor" />
-                    </svg>
-                  </span>
-                  <span className="tutorial-card-copy">
-                    <span className="tutorial-card-platform">Bilibili</span>
-                    <strong>{t(uiLanguage, "hero.videoBilibili")}</strong>
-                    <span>{t(uiLanguage, "hero.videoHint")}</span>
-                  </span>
-                </a>
-              </div>
-            </div>
-            <div className="badge-row">
-              <span className="badge">{t(uiLanguage, "badge.world")}</span>
-              <span className="badge">{t(uiLanguage, "badge.mbti")}</span>
-              <span className="badge">{t(uiLanguage, "badge.relationship")}</span>
-              <span className="badge">{t(uiLanguage, "badge.affection")}</span>
               <a
-                className="badge discord-badge"
-                href="https://discord.gg/Y5EExWtP"
+                aria-label={`Bilibili · ${t(uiLanguage, "hero.videoBilibili")}`}
+                className="tutorial-card"
+                data-platform="bilibili"
+                href={TUTORIAL_VIDEO_LINKS.bilibili}
                 rel="noopener noreferrer"
                 target="_blank"
               >
-                <svg width="20" height="16" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.3 37.3 0 0025.4.3a.2.2 0 00-.2-.1 58.4 58.4 0 00-14.7 4.6.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.2a58.9 58.9 0 0017.7 9 .2.2 0 00.3-.1 42.1 42.1 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.7.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.7 58.7 0 0070.7 45.7v-.2c1.4-15.2-2.4-28.4-10-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.3 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1z" fill="currentColor"/>
-                </svg>
-                {t(uiLanguage, "badge.discord")}
+                <span className="tutorial-card-icon" aria-hidden="true">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 4.5v9L13 9 5 4.5z" fill="currentColor" />
+                  </svg>
+                </span>
+                <span className="tutorial-card-copy">
+                  <span className="tutorial-card-platform">Bilibili</span>
+                  <strong>{t(uiLanguage, "hero.videoBilibili")}</strong>
+                  <span>{t(uiLanguage, "hero.videoHint")}</span>
+                </span>
               </a>
             </div>
+            <div className="hero-process-grid">
+              {editorSteps.map((step, index) => (
+                <div className="hero-process-item" key={step.key}>
+                  <span>{`0${index + 1}`}</span>
+                  <strong>{step.title}</strong>
+                  <p>{step.description}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="hint-box">
-            <strong>{t(uiLanguage, "hero.why")}</strong>
-            <p>{t(uiLanguage, "hero.whyBody")}</p>
+          <div className="hero-stage">
+            <div className="hero-stage-panel">
+              <div className="hero-stage-stack" aria-hidden="true">
+                {HERO_GALLERY.map((photo, index) => (
+                  <img
+                    alt=""
+                    className={`hero-stage-shot hero-stage-shot-${index + 1}`}
+                    key={photo}
+                    src={photo}
+                  />
+                ))}
+              </div>
+              <div className="hint-box hero-insight-card">
+                <strong>{t(uiLanguage, "hero.why")}</strong>
+                <p>{t(uiLanguage, "hero.whyBody")}</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -2218,7 +2380,7 @@ export function DesignerApp({
         </section>
       )}
 
-      <section className="panel">
+      <section className="panel panel-runtime">
         <div className="panel-inner stack">
           <div className="panel-title">
             <div>
@@ -2233,7 +2395,7 @@ export function DesignerApp({
               : t(uiLanguage, "runtime.noneSaved")}
           </div>
 
-          <details>
+          <details className="runtime-details">
             <summary>{t(uiLanguage, "runtime.localDebug")}</summary>
             <div className="actions" style={{ marginTop: "0.75rem" }}>
               {discordRuntimeStatus.running ? (

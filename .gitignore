@@ -21,6 +21,9 @@ data/discord-runtime-locks/
 public/uploads/*
 !public/uploads/.gitkeep
 
+# character workspaces (runtime-generated)
+workspace-*/
+
 # misc
 .DS_Store
 *.log

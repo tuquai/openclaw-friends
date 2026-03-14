@@ -3,13 +3,14 @@ import { promisify } from "util";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resolveOptionalPathEnv } from "@/lib/env-path";
 
 const execFile = promisify(execFileCb);
 
 const AGENT_ID = "designer-llm";
 
 function getOpenClawRoot() {
-  return process.env.OPENCLAW_HOME ?? path.join(os.homedir(), ".openclaw");
+  return resolveOptionalPathEnv(process.env.OPENCLAW_HOME, path.join(os.homedir(), ".openclaw"));
 }
 
 function getWorkspacePath() {

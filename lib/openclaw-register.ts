@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { buildDiscordAccountId, normalizeDiscordBotToken } from "@/lib/discord-account";
 import { readDiscordRuntimeAccount, readDiscordRuntimeConfig } from "@/lib/discord-config";
+import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { CharacterRecord } from "@/lib/types";
 
 type OpenClawConfig = {
@@ -36,7 +37,7 @@ type DiscordBindingMatch = {
 };
 
 function getOpenClawRoot() {
-  return process.env.OPENCLAW_HOME ?? path.join(os.homedir(), ".openclaw");
+  return resolveOptionalPathEnv(process.env.OPENCLAW_HOME, path.join(os.homedir(), ".openclaw"));
 }
 
 function buildStableAgentId(id: string) {

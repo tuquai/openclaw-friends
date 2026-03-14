@@ -1,11 +1,12 @@
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 import { normalizeLanguage } from "@/lib/i18n";
 
 function getWorkspaceRoot() {
-  return process.env.OPENCLAW_WORKSPACE_ROOT ?? path.join(os.homedir(), ".openclaw");
+  return resolveOptionalPathEnv(process.env.OPENCLAW_WORKSPACE_ROOT, path.join(os.homedir(), ".openclaw"));
 }
 
 function slugify(value: string) {
@@ -1279,9 +1280,16 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
   await writeCharacterRecord(workspaceCharacter);
 
   const memoryDaily = path.join(memoryDir, `${new Date().toISOString().slice(0, 10)}.md`);
+  const memoryLines = [
+    `Blueprint created for ${character.name}.`,
+    "",
+    ...(character.mbti ? [`- MBTI: ${character.mbti}`] : []),
+    `- World: ${character.worldSetting}`,
+    `- Concept: ${character.concept}`
+  ];
   await fs.writeFile(
     memoryDaily,
-    `Blueprint created for ${character.name}.\n\n- MBTI: ${character.mbti}\n- World: ${character.worldSetting}\n- Concept: ${character.concept}\n`,
+    `${memoryLines.join("\n")}\n`,
     "utf8"
   );
 
@@ -1478,7 +1486,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
         heritage: base.heritage ?? "",
         worldSetting: base.worldSetting ?? "当代地球",
         concept: base.concept ?? "",
-        mbti: base.mbti ?? "",
+        mbti: base.mbti ?? undefined,
         coreTraits: [],
         speakingStyle: [],
         emotionalHabits: [],
@@ -1490,8 +1498,6 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
         backstory: "",
         affectionBaseline: "",
         affectionGrowthPath: [],
-        chemistry: [],
-        friction: [],
         userAddressingStyle: ""
       },
       followups: {
@@ -1598,7 +1604,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
     heritage: base.heritage ?? "",
     worldSetting: base.worldSetting ?? "当代地球",
     concept: base.concept ?? "",
-    mbti: base.mbti ?? "",
+    mbti: base.mbti ?? undefined,
     personality: base.personality ?? {
       socialEnergy: "",
       informationFocus: "",

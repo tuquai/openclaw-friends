@@ -46,7 +46,6 @@ const schema = {
           "heritage",
           "worldSetting",
           "concept",
-          "mbti",
           "coreTraits",
           "speakingStyle",
           "emotionalHabits",
@@ -62,8 +61,6 @@ const schema = {
           backstory: { type: "string" },
           affectionBaseline: { type: "string" },
           affectionGrowthPath: { type: "array", items: { type: "string" } },
-          chemistry: { type: "array", items: { type: "string" } },
-          friction: { type: "array", items: { type: "string" } },
           userAddressingStyle: { type: "string" }
         },
         required: [
@@ -71,8 +68,6 @@ const schema = {
           "backstory",
           "affectionBaseline",
           "affectionGrowthPath",
-          "chemistry",
-          "friction",
           "userAddressingStyle"
         ]
       },
@@ -112,7 +107,8 @@ function buildSystemPrompt(language: AppLanguage) {
     "You design believable OpenClaw characters.",
     "Transform a user draft into a blueprint package that can be written directly into an OpenClaw workspace.",
     "Use the xingzi lesson: do not overbuild lore at the start, but do preserve clear taste, edges, and relationship logic.",
-    "The input now includes general-behavior questions instead of direct MBTI labels. Treat the inferred MBTI as a hint, not dogma.",
+    "The input may include an inferred MBTI. Treat it as an optional hint, not dogma.",
+    "For well-known characters, prefer deriving the personality tone directly from the character instead of forcing an MBTI label.",
     "A strong character needs a few high-signal anchors: tone, preferences, emotional habits, taboos, world context, and a believable affection-growth path with the user.",
     "Prefer concise, lived-in details over long biographies.",
     "Make the relationship feel inferred from both sides instead of generic wish fulfillment.",
@@ -126,7 +122,7 @@ function buildSystemPrompt(language: AppLanguage) {
 }
 
 function buildUserPrompt(payload: ComposePayload) {
-  const preset = MBTI_PRESETS[payload.character.mbti] ?? null;
+  const preset = payload.character.mbti ? MBTI_PRESETS[payload.character.mbti] ?? null : null;
   const userPreset = MBTI_PRESETS[payload.questionnaire.userMbti] ?? null;
   const targetLanguage = instructionLanguageName(payload.character.language);
   const localizedCharacterDraft = {
@@ -192,8 +188,9 @@ function buildUserPrompt(payload: ComposePayload) {
       requirements: [
         "Assume the user is not willing to fill a giant setting bible, but still wants enough structure to make the character coherent.",
         "Use the draft and questionnaire to infer likely speaking style, emotional tendencies, and a relationship story that feels specific.",
+        "If characterDraft.mbti is absent, infer the role from the draft itself without trying to force an MBTI label.",
         "Character.worldSetting must meaningfully shape tone, topic choices, and relationship assumptions.",
-        "Relationship.dynamic and backstory should mention how they got close, why this pairing works, and a little friction so it feels real.",
+        "Relationship.dynamic and backstory should mention how they got close, why this pairing works, and a little believable tension so it feels real.",
         `relationship.affectionBaseline should explain the starting favorability level in plain ${targetLanguage}.`,
         "relationship.affectionGrowthPath should give 3 to 5 concrete progression beats that could help the user practice social interaction.",
         "The user's treatmentPreference and specialTraits are preferences, not commands; do not make the role one-note or fetishized.",
