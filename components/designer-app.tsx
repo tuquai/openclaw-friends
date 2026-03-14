@@ -99,9 +99,7 @@ const initialRelationshipQuestionnaire: RelationshipQuestionnaireInput = {
   treatmentPreference: { selected: [QUESTION_OPTIONS.treatmentPreference[0]], custom: "" },
   specialTraits: { selected: [QUESTION_OPTIONS.specialTraits[0]], custom: "" },
   affectionPlan: {
-    initialFavorability: 45,
-    growthRoute: QUESTION_OPTIONS.affectionGrowthRoute[0],
-    growthRouteCustom: ""
+    initialFavorability: 45
   }
 };
 
@@ -115,7 +113,7 @@ const TUTORIAL_VIDEO_LINKS = {
   bilibili: "https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click"
 } as const;
 
-const HERO_GALLERY = ["/chat1.jpg", "/chat2.jpg", "/chat3.jpg"] as const;
+const HERO_GALLERY = ["/model1.png", "/model2.png", "/model3.png"] as const;
 
 function safeList(value: string[] | undefined) {
   return Array.isArray(value) ? value : [];
@@ -1378,24 +1376,6 @@ export function DesignerApp({
               </div>
             </div>
 
-            <ChoiceField
-              field={{
-                selected: relationshipQuestionnaire.affectionPlan.growthRoute,
-                custom: relationshipQuestionnaire.affectionPlan.growthRouteCustom
-              }}
-              label={t(uiLanguage, "field.affectionGrowthRoute")}
-              language={uiLanguage}
-              onChange={(field, value) =>
-                setRelationshipQuestionnaire((current) => ({
-                  ...current,
-                  affectionPlan: {
-                    ...current.affectionPlan,
-                    [field === "selected" ? "growthRoute" : "growthRouteCustom"]: value
-                  }
-                }))
-              }
-              options={QUESTION_OPTIONS.affectionGrowthRoute}
-            />
           </div>
 
           <div className="footer-note">{t(uiLanguage, "relationship.footer")}</div>
@@ -1443,58 +1423,47 @@ export function DesignerApp({
           </div>
 
           <div className="character-list">
-            {characters.map((character) => (
-              <article className="library-card-shell" key={character.id}>
-                <button
-                  className="library-card"
-                  data-active={character.id === selectedId}
-                  onClick={() => setSelectedId(character.id)}
-                  type="button"
-                >
-                  {character.photos[0] || character.workspacePath ? (
-                    <img alt={character.name} className="library-card-thumb" src={characterAvatarSrc(character)} />
-                  ) : (
-                    <div className="library-card-thumb library-card-thumb-placeholder">{character.name.slice(0, 1)}</div>
-                  )}
-                  <div className="library-card-content">
-                    <div className="library-card-header">
-                      <div className="library-card-title-block">
-                        <strong>{character.name}</strong>
-                      </div>
-                      <span className="library-card-updated">
-                        {t(uiLanguage, "list.updated")} {formatRepoUpdatedAt(uiLanguage, character.updatedAt)}
-                      </span>
+            {characters.map((character) => {
+              const oneLiner = characterPreview(character, uiLanguage);
+              const isActive = character.id === selectedId;
+              return (
+                <article className="library-card-shell" key={character.id}>
+                  <button
+                    className="library-card"
+                    data-active={isActive}
+                    onClick={() => setSelectedId(character.id)}
+                    type="button"
+                  >
+                    {character.photos[0] || character.workspacePath ? (
+                      <img alt={character.name} className="library-card-thumb" src={characterAvatarSrc(character)} />
+                    ) : (
+                      <div className="library-card-thumb library-card-thumb-placeholder">{character.name.slice(0, 1)}</div>
+                    )}
+                    <div className="library-card-content">
+                      <strong>{character.name}</strong>
+                      {oneLiner ? <p className="library-card-preview">{oneLiner}</p> : null}
                     </div>
-                    <div className="library-card-meta">
-                      {character.age ? <span className="pill">{formatAgeLabel(uiLanguage, character.age)}</span> : null}
-                      {resolveCharacterMbti(character) ? <span className="pill">{resolveCharacterMbti(character)}</span> : null}
-                      {character.occupation ? <span className="pill warm">{character.occupation}</span> : null}
-                      <span className="pill">{getLanguageLabel(uiLanguage, character.language)}</span>
-                      {character.discordLink ? <span className="pill">{t(uiLanguage, "pill.discordBound")}</span> : null}
-                      {character.workspacePath ? <span className="pill">{t(uiLanguage, "pill.workspaceReady")}</span> : null}
-                    </div>
-                    <p className="library-card-preview">{characterPreview(character, uiLanguage)}</p>
+                  </button>
+                  <div className="library-card-actions">
+                    <button
+                      className="button-ghost library-card-action"
+                      onClick={() => startEditingCharacter(character.id)}
+                      type="button"
+                    >
+                      {t(uiLanguage, "button.edit")}
+                    </button>
+                    <button
+                      className="button-danger library-card-action"
+                      disabled={isSaving}
+                      onClick={() => handleDeleteCharacter(character.id, character.name)}
+                      type="button"
+                    >
+                      {t(uiLanguage, "button.delete")}
+                    </button>
                   </div>
-                </button>
-                <div className="library-card-actions">
-                  <button
-                    className="button-ghost library-card-action"
-                    onClick={() => startEditingCharacter(character.id)}
-                    type="button"
-                  >
-                    {t(uiLanguage, "button.edit")}
-                  </button>
-                  <button
-                    className="button-danger library-card-action"
-                    disabled={isSaving}
-                    onClick={() => handleDeleteCharacter(character.id, character.name)}
-                    type="button"
-                  >
-                    {t(uiLanguage, "button.delete")}
-                  </button>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
 
             {characters.length === 0 ? (
               <div className="empty-state">
@@ -1679,10 +1648,8 @@ export function DesignerApp({
       <>
         <section className="profile-step-grid">
           {renderEditorPanel()}
-          <div className="profile-step-side">
-            {renderUserProfilePanel()}
-            {renderRelationshipPanel()}
-          </div>
+          {renderUserProfilePanel()}
+          {renderRelationshipPanel()}
         </section>
         <section className="panel panel-support">
           <div className="panel-inner wizard-footer">
@@ -2204,6 +2171,21 @@ export function DesignerApp({
     <main className="shell">
       <section className="hero">
         <div className="hero-toolbar">
+          <a
+            aria-label={t(uiLanguage, "hero.githubAria")}
+            className="github-star-link"
+            href={githubUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path
+                d="M12 1.5a10.5 10.5 0 00-3.32 20.46c.53.1.72-.23.72-.51 0-.25-.01-1.08-.02-1.96-2.95.64-3.57-1.25-3.57-1.25-.48-1.22-1.17-1.54-1.17-1.54-.96-.65.07-.64.07-.64 1.06.08 1.62 1.09 1.62 1.09.94 1.61 2.46 1.15 3.06.88.1-.68.37-1.15.67-1.41-2.36-.27-4.84-1.18-4.84-5.26 0-1.16.41-2.11 1.09-2.86-.11-.27-.47-1.36.1-2.84 0 0 .89-.29 2.9 1.09a10.1 10.1 0 015.28 0c2.01-1.38 2.9-1.09 2.9-1.09.57 1.48.21 2.57.1 2.84.68.75 1.09 1.7 1.09 2.86 0 4.09-2.49 4.99-4.86 5.25.38.33.72.98.72 1.97 0 1.42-.01 2.56-.01 2.91 0 .28.19.61.73.51A10.5 10.5 0 0012 1.5z"
+                fill="currentColor"
+              />
+            </svg>
+            <span>{t(uiLanguage, "hero.githubCta")}</span>
+          </a>
           <div className="hero-language-picker">
             <label htmlFor="ui-language">{t(uiLanguage, "language.ui")}</label>
             <select
@@ -2228,58 +2210,17 @@ export function DesignerApp({
           <div className="hero-copy">
             <h1>{t(uiLanguage, "hero.title")}</h1>
             <p>{t(uiLanguage, "hero.description")}</p>
-            <div className="badge-row hero-badge-row">
-              <span className="badge">{t(uiLanguage, "badge.world")}</span>
-              <span className="badge">{t(uiLanguage, "badge.mbti")}</span>
-              <span className="badge">{t(uiLanguage, "badge.relationship")}</span>
-              <span className="badge">{t(uiLanguage, "badge.affection")}</span>
-              <a
-                className="badge discord-badge"
-                href="https://discord.gg/Y5EExWtP"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                <svg width="20" height="16" viewBox="0 0 71 55" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M60.1 4.9A58.5 58.5 0 0045.4.2a.2.2 0 00-.2.1 40.8 40.8 0 00-1.8 3.7 54 54 0 00-16.2 0A37.3 37.3 0 0025.4.3a.2.2 0 00-.2-.1 58.4 58.4 0 00-14.7 4.6.2.2 0 00-.1.1C1.5 18.7-.9 32.2.3 45.5v.2a58.9 58.9 0 0017.7 9 .2.2 0 00.3-.1 42.1 42.1 0 003.6-5.9.2.2 0 00-.1-.3 38.8 38.8 0 01-5.5-2.7.2.2 0 01 0-.4l1.1-.9a.2.2 0 01.2 0 42 42 0 0035.6 0 .2.2 0 01.2 0l1.1.9a.2.2 0 010 .3 36.4 36.4 0 01-5.5 2.7.2.2 0 00-.1.3 47.2 47.2 0 003.6 5.9.2.2 0 00.3.1A58.7 58.7 0 0070.7 45.7v-.2c1.4-15.2-2.4-28.4-10-40.1a.2.2 0 00-.1-.1zM23.7 37.3c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1zm23.3 0c-3.5 0-6.3-3.2-6.3-7.1s2.8-7.1 6.3-7.1 6.4 3.2 6.3 7.1c0 3.9-2.8 7.1-6.3 7.1z" fill="currentColor"/>
-                </svg>
-                {t(uiLanguage, "badge.discord")}
-              </a>
-            </div>
             <div className="hero-social-row">
               <a
-                aria-label={t(uiLanguage, "hero.githubAria")}
-                className="github-cta"
-                href={githubUrl}
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                <span className="github-cta-icon" aria-hidden="true">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path
-                      d="M12 1.5a10.5 10.5 0 00-3.32 20.46c.53.1.72-.23.72-.51 0-.25-.01-1.08-.02-1.96-2.95.64-3.57-1.25-3.57-1.25-.48-1.22-1.17-1.54-1.17-1.54-.96-.65.07-.64.07-.64 1.06.08 1.62 1.09 1.62 1.09.94 1.61 2.46 1.15 3.06.88.1-.68.37-1.15.67-1.41-2.36-.27-4.84-1.18-4.84-5.26 0-1.16.41-2.11 1.09-2.86-.11-.27-.47-1.36.1-2.84 0 0 .89-.29 2.9 1.09a10.1 10.1 0 015.28 0c2.01-1.38 2.9-1.09 2.9-1.09.57 1.48.21 2.57.1 2.84.68.75 1.09 1.7 1.09 2.86 0 4.09-2.49 4.99-4.86 5.25.38.33.72.98.72 1.97 0 1.42-.01 2.56-.01 2.91 0 .28.19.61.73.51A10.5 10.5 0 0012 1.5z"
-                      fill="currentColor"
-                    />
-                  </svg>
-                </span>
-                <span className="github-cta-copy">
-                  <strong>{t(uiLanguage, "hero.githubCta")}</strong>
-                  <span>{t(uiLanguage, "hero.githubHint")}</span>
-                </span>
-              </a>
-              <div className="hero-update-card">
-                <span className="hero-update-label">{t(uiLanguage, "hero.updatedLabel")}</span>
-                <strong>{formatRepoUpdatedAt(uiLanguage, repoUpdatedAt)}</strong>
-              </div>
-              <a
                 aria-label={`Bilibili · ${t(uiLanguage, "hero.videoBilibili")}`}
-                className="tutorial-card"
+                className="tutorial-card tutorial-card-featured"
                 data-platform="bilibili"
                 href={TUTORIAL_VIDEO_LINKS.bilibili}
                 rel="noopener noreferrer"
                 target="_blank"
               >
                 <span className="tutorial-card-icon" aria-hidden="true">
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <svg width="20" height="20" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M5 4.5v9L13 9 5 4.5z" fill="currentColor" />
                   </svg>
                 </span>
@@ -2289,15 +2230,6 @@ export function DesignerApp({
                   <span>{t(uiLanguage, "hero.videoHint")}</span>
                 </span>
               </a>
-            </div>
-            <div className="hero-process-grid">
-              {editorSteps.map((step, index) => (
-                <div className="hero-process-item" key={step.key}>
-                  <span>{`0${index + 1}`}</span>
-                  <strong>{step.title}</strong>
-                  <p>{step.description}</p>
-                </div>
-              ))}
             </div>
           </div>
           <div className="hero-stage">
@@ -2311,10 +2243,6 @@ export function DesignerApp({
                     src={photo}
                   />
                 ))}
-              </div>
-              <div className="hint-box hero-insight-card">
-                <strong>{t(uiLanguage, "hero.why")}</strong>
-                <p>{t(uiLanguage, "hero.whyBody")}</p>
               </div>
             </div>
           </div>

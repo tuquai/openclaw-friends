@@ -159,8 +159,6 @@ export type RelationshipQuestionnaireInput = {
   specialTraits: MultiChoiceInput;
   affectionPlan: {
     initialFavorability: number;
-    growthRoute: string;
-    growthRouteCustom: string;
   };
 };
 

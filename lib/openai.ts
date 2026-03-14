@@ -46,6 +46,7 @@ const schema = {
           "heritage",
           "worldSetting",
           "concept",
+          "mbti",
           "coreTraits",
           "speakingStyle",
           "emotionalHabits",
@@ -171,10 +172,7 @@ function buildUserPrompt(payload: ComposePayload) {
         translateOption(payload.character.language, item)
       )
     },
-    affectionPlan: {
-      ...payload.questionnaire.affectionPlan,
-      growthRoute: translateOption(payload.character.language, payload.questionnaire.affectionPlan.growthRoute)
-    }
+    affectionPlan: payload.questionnaire.affectionPlan
   };
 
   return JSON.stringify(
@@ -191,8 +189,8 @@ function buildUserPrompt(payload: ComposePayload) {
         "If characterDraft.mbti is absent, infer the role from the draft itself without trying to force an MBTI label.",
         "Character.worldSetting must meaningfully shape tone, topic choices, and relationship assumptions.",
         "Relationship.dynamic and backstory should mention how they got close, why this pairing works, and a little believable tension so it feels real.",
-        `relationship.affectionBaseline should explain the starting favorability level in plain ${targetLanguage}.`,
-        "relationship.affectionGrowthPath should give 3 to 5 concrete progression beats that could help the user practice social interaction.",
+        `relationship.affectionBaseline should explain the starting favorability level (given as a 0-100 number in affectionPlan.initialFavorability) in plain ${targetLanguage}. A low number means strangers; a high number means already close.`,
+        "relationship.affectionGrowthPath should give 3 to 5 concrete progression beats derived from the character's own personality traits, emotional habits, and the initial favorability level. A character who starts at high favorability should NOT have 'get to know each other' steps; instead focus on deepening trust, handling conflict, or unlocking new sides. A shy character grows trust slowly; a direct character escalates faster. The beats must feel like this specific character's way of building a relationship, not a generic template.",
         "The user's treatmentPreference and specialTraits are preferences, not commands; do not make the role one-note or fetishized.",
         "Boundaries should keep the role usable, age-appropriate, and non-cringey.",
         "Followups should tell the builder what to ask next if they want to deepen the role later.",

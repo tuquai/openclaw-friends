@@ -62,6 +62,28 @@
 
 ---
 
+## 快速安装（通过 OpenClaw Agent）
+
+如果你已经安装了 OpenClaw CLI 并且有可用的 agent，可以直接在对话中让 agent 帮你安装：
+
+```bash
+# 前置条件：Node.js v18+、npm v9+、git
+# 推荐安装路径：~/code/openclaw-friends
+
+mkdir -p ~/code && cd ~/code
+git clone https://github.com/tuquai/openclaw-friends.git
+cd openclaw-friends
+npm install
+cp .env.example .env
+npm run dev
+```
+
+启动后打开 `http://localhost:3000`。如果 OpenClaw Gateway 正在运行，Blueprint 生成会自动走 `designer-llm` agent，无需配置 OpenAI API Key。
+
+如果 `git clone` SSH 方式失败，改用上面的 HTTPS 地址。如果 Node.js 未安装，推荐用 [nvm](https://github.com/nvm-sh/nvm) 安装 v22 LTS。
+
+---
+
 ## 安装与运行
 
 ### 前置条件
@@ -78,7 +100,7 @@
 ### 第一步：克隆仓库
 
 ```bash
-git clone git@github.com:zhouyi531/openclaw-friends.git
+git clone https://github.com/tuquai/openclaw-friends.git
 cd openclaw-friends
 ```
 

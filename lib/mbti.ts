@@ -169,8 +169,7 @@ export const QUESTION_OPTIONS = {
     "很会照顾细节",
     "审美很好",
     "有一点控制欲但讲道理"
-  ],
-  affectionGrowthRoute: ["从陌生到熟悉慢慢升温", "已经有高好感，重点是稳定关系", "先互相试探再逐步信任", "一起经历事件后快速升温"]
+  ]
 } as const;
 
 function inferLetter(
