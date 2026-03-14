@@ -1403,57 +1403,52 @@ export function DesignerApp({
             </div>
           </div>
 
-          <div className="library-overview">
-            <div className="library-stat">
-              <span>{t(uiLanguage, "list.total")}</span>
-              <strong>{characters.length}</strong>
-            </div>
-            <div className="library-stat">
-              <span>{t(uiLanguage, "list.workspaceReady")}</span>
-              <strong>{workspaceReadyCount}</strong>
-            </div>
-            <div className="library-stat">
-              <span>{t(uiLanguage, "list.blueprintReady")}</span>
-              <strong>{blueprintReadyCount}</strong>
-            </div>
-            <div className="library-stat">
-              <span>{t(uiLanguage, "list.discordReady")}</span>
-              <strong>{discordReadyCount}</strong>
-            </div>
-          </div>
-
           <div className="character-list">
             {characters.map((character) => {
               const oneLiner = characterPreview(character, uiLanguage);
               const isActive = character.id === selectedId;
+              const charMbti = resolveCharacterMbti(character);
+              const hasDiscord = Boolean(character.discordLink?.channelId && character.discordLink.userId);
+              const hasWorkspace = Boolean(character.workspacePath);
               return (
-                <article className="library-card-shell" key={character.id}>
+                <article className="browse-card" data-active={isActive} key={character.id}>
                   <button
-                    className="library-card"
-                    data-active={isActive}
+                    className="browse-card-select"
                     onClick={() => setSelectedId(character.id)}
                     type="button"
                   >
                     {character.photos[0] || character.workspacePath ? (
-                      <img alt={character.name} className="library-card-thumb" src={characterAvatarSrc(character)} />
+                      <img alt={character.name} className="browse-card-avatar" src={characterAvatarSrc(character)} />
                     ) : (
-                      <div className="library-card-thumb library-card-thumb-placeholder">{character.name.slice(0, 1)}</div>
+                      <div className="browse-card-avatar browse-card-avatar-placeholder">{character.name.slice(0, 1)}</div>
                     )}
-                    <div className="library-card-content">
+                    <div className="browse-card-body">
                       <strong>{character.name}</strong>
-                      {oneLiner ? <p className="library-card-preview">{oneLiner}</p> : null}
+                      <div className="meta-line">
+                        {character.age ? <span className="pill">{formatAgeLabel(uiLanguage, character.age)}</span> : null}
+                        {charMbti ? <span className="pill warm">{charMbti}</span> : null}
+                        {character.occupation ? <span className="pill">{character.occupation}</span> : null}
+                        <span className="pill">{getLanguageLabel(uiLanguage, character.language)}</span>
+                        {hasDiscord ? <span className="pill">{t(uiLanguage, "detail.statusDiscordReady")}</span> : null}
+                      </div>
+                      {hasWorkspace ? (
+                        <div className="meta-line">
+                          <span className="pill">{t(uiLanguage, "detail.statusWorkspaceReady")}</span>
+                        </div>
+                      ) : null}
+                      {oneLiner ? <p className="browse-card-preview">{oneLiner}</p> : null}
                     </div>
                   </button>
-                  <div className="library-card-actions">
+                  <div className="browse-card-actions">
                     <button
-                      className="button-ghost library-card-action"
+                      className="button-ghost browse-card-action"
                       onClick={() => startEditingCharacter(character.id)}
                       type="button"
                     >
                       {t(uiLanguage, "button.edit")}
                     </button>
                     <button
-                      className="button-danger library-card-action"
+                      className="button-danger browse-card-action"
                       disabled={isSaving}
                       onClick={() => handleDeleteCharacter(character.id, character.name)}
                       type="button"
@@ -1871,52 +1866,90 @@ export function DesignerApp({
       ? relationshipQuestionnaire
       : selected?.questionnaire ?? initialRelationshipQuestionnaire;
 
+    if (!isWizardMode) {
+      return (
+        <section className="panel panel-preview">
+          <div className="panel-inner">
+            <div className="panel-title">
+              <div>
+                <h3>{t(uiLanguage, "detail.title")}</h3>
+                <p>{t(uiLanguage, "detail.descriptionBrowse")}</p>
+              </div>
+            </div>
+
+            {selected ? (
+              <div className="detail-browse">
+                <h2 className="detail-browse-name">{selected.name}</h2>
+                <div className="meta-line">
+                  {selected.age ? <span className="pill">{formatAgeLabel(uiLanguage, selected.age)}</span> : null}
+                  {selected.gender ? <span className="pill">{selected.gender}</span> : null}
+                  {selectedMbti ? <span className="pill warm">{selectedMbti}</span> : null}
+                  <span className="pill">{getLanguageLabel(uiLanguage, selected.language)}</span>
+                </div>
+
+                <div className="detail-browse-sections">
+                  <div className="detail-browse-section">
+                    <h4>{t(uiLanguage, "detail.basicInfo")}</h4>
+                    <p>{selected.occupation || t(uiLanguage, "detail.emptyOccupation")}{selected.heritage ? ` / ${selected.heritage}` : ""}</p>
+                  </div>
+
+                  <div className="detail-browse-section">
+                    <p>{t(uiLanguage, "detail.worldSetting")}{selected.worldSetting || t(uiLanguage, "detail.emptyWorldSetting")}</p>
+                  </div>
+
+                  {selected.concept ? (
+                    <div className="detail-browse-section">
+                      <p>{selected.concept}</p>
+                    </div>
+                  ) : null}
+
+                  <div className="detail-browse-section">
+                    <h4>{t(uiLanguage, "detail.personality")}</h4>
+                    <p>
+                      {[
+                        selectedMbti,
+                        `${translateOption(uiLanguage, selected.personality.socialEnergy)} / ${translateOption(uiLanguage, selected.personality.informationFocus)} / ${translateOption(uiLanguage, selected.personality.decisionStyle)} / ${translateOption(uiLanguage, selected.personality.lifestylePace)}`
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  </div>
+
+                  {selected.blueprintPackage ? (
+                    <>
+                      <div className="detail-browse-section">
+                        <h4>{t(uiLanguage, "detail.summary")}</h4>
+                        <p>{selected.blueprintPackage.summary.oneLiner}</p>
+                      </div>
+                      <div className="detail-browse-section">
+                        <p>{t(uiLanguage, "detail.archetype")}{selected.blueprintPackage.summary.archetype}</p>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <p>{characters.length === 0 ? t(uiLanguage, "empty.noCharacters") : t(uiLanguage, "empty.noSelectedCharacter")}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      );
+    }
+
     return (
-      <section className={`panel panel-preview${isWizardMode ? " panel-preview-wizard" : ""}`}>
+      <section className="panel panel-preview panel-preview-wizard">
         <div className="panel-inner">
           <div className="panel-title">
             <div>
               <h3>{t(uiLanguage, "detail.title")}</h3>
-              <p>{isWizardMode ? t(uiLanguage, "detail.descriptionWizard") : t(uiLanguage, "detail.descriptionBrowse")}</p>
+              <p>{t(uiLanguage, "detail.descriptionWizard")}</p>
             </div>
           </div>
 
           {selected ? (
             <div className="detail-block">
-              {!isWizardMode ? (
-                <div className="detail-command-bar">
-                  <div className="detail-status-row">
-                    <span className={`detail-status-pill${selected.blueprintPackage ? "" : " is-muted"}`}>
-                      {selected.blueprintPackage ? t(uiLanguage, "detail.statusBlueprintReady") : t(uiLanguage, "detail.statusBlueprintMissing")}
-                    </span>
-                    {selected.workspacePath ? (
-                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusWorkspaceReady")}</span>
-                    ) : null}
-                    {selected.discordLink?.channelId && selected.discordLink.userId ? (
-                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusDiscordReady")}</span>
-                    ) : null}
-                    {selected.tuquConfig?.characterId ? (
-                      <span className="detail-status-pill">{t(uiLanguage, "detail.statusTuquReady")}</span>
-                    ) : null}
-                  </div>
-                  <div className="actions">
-                    <button className="button-ghost" onClick={() => startEditingCharacter(selected.id)} type="button">
-                      {t(uiLanguage, "button.edit")}
-                    </button>
-                    {selected.blueprintPackage ? (
-                      <button
-                        className="button-secondary"
-                        disabled={isSavingBlueprintFiles}
-                        onClick={handleSaveBlueprintFiles}
-                        type="button"
-                      >
-                        {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.saveMarkdown")}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-
               <div className="detail-hero">
                 {selected.photos[0] || selected.workspacePath ? (
                   <img alt={selected.name} className="detail-hero-thumb" src={characterAvatarSrc(selected)} />
@@ -2131,21 +2164,17 @@ export function DesignerApp({
                   </div>
 
                   <div className="actions">
-                    {isWizardMode ? (
-                      <>
-                        <button className="button-ghost" onClick={handleDetailsPrevious} type="button">
-                          {t(uiLanguage, "button.previous")}
-                        </button>
-                        <button
-                          className="button-primary"
-                          disabled={isSavingBlueprintFiles}
-                          onClick={handleDetailsNext}
-                          type="button"
-                        >
-                          {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.next")}
-                        </button>
-                      </>
-                    ) : null}
+                    <button className="button-ghost" onClick={handleDetailsPrevious} type="button">
+                      {t(uiLanguage, "button.previous")}
+                    </button>
+                    <button
+                      className="button-primary"
+                      disabled={isSavingBlueprintFiles}
+                      onClick={handleDetailsNext}
+                      type="button"
+                    >
+                      {isSavingBlueprintFiles ? t(uiLanguage, "button.saving") : t(uiLanguage, "button.next")}
+                    </button>
                   </div>
                   <div className="workspace-feedback">
                     {blueprintFilesStatus || t(uiLanguage, "detail.markdownHint")}
