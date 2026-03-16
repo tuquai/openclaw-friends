@@ -1,8 +1,8 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
-import { getCharacter, updateCharacter } from "@/lib/data";
-import { syncWorkspaceTuquConfig } from "@/lib/workspace";
+import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
+import { syncOpenClawRolesFile, syncWorkspaceAssociates, syncWorkspaceTuquConfig } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -86,6 +86,8 @@ export async function POST(request: NextRequest) {
     });
 
     await syncWorkspaceTuquConfig(updated);
+    await syncWorkspaceAssociates(updated);
+    await syncOpenClawRolesFile(await listCharacters());
 
     return NextResponse.json({
       character: updated,

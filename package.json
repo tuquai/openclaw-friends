@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "git submodule update --init && bash scripts/install-skills.sh"
+    "postinstall": "bash scripts/install-skills.sh"
   },
   "dependencies": {
     "discord.js": "^14.25.1",

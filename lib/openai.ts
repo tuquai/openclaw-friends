@@ -109,7 +109,9 @@ function buildSystemPrompt(language: AppLanguage) {
     "Transform a user draft into a blueprint package that can be written directly into an OpenClaw workspace.",
     "Use the xingzi lesson: do not overbuild lore at the start, but do preserve clear taste, edges, and relationship logic.",
     "The input may include an inferred MBTI. Treat it as an optional hint, not dogma.",
-    "For well-known characters, prefer deriving the personality tone directly from the character instead of forcing an MBTI label.",
+    "If personality inference is disabled, do not invent MBTI axes or force MBTI-style labels.",
+    "If the concept identifies a well-known fictional or public character, use the concept as a retrieval anchor and reconstruct the character's canonical background, relationships, speech patterns, aesthetics, world logic, and boundaries from your existing knowledge before adapting the role package.",
+    "For well-known characters, prefer deriving the personality tone directly from canon instead of forcing an MBTI label.",
     "A strong character needs a few high-signal anchors: tone, preferences, emotional habits, taboos, world context, and a believable affection-growth path with the user.",
     "Prefer concise, lived-in details over long biographies.",
     "Make the relationship feel inferred from both sides instead of generic wish fulfillment.",
@@ -123,18 +125,42 @@ function buildSystemPrompt(language: AppLanguage) {
 }
 
 function buildUserPrompt(payload: ComposePayload) {
-  const preset = payload.character.mbti ? MBTI_PRESETS[payload.character.mbti] ?? null : null;
+  const personalityInferenceEnabled = payload.character.personalityInferenceEnabled !== false;
+  const preset =
+    personalityInferenceEnabled && payload.character.mbti ? MBTI_PRESETS[payload.character.mbti] ?? null : null;
   const userPreset = MBTI_PRESETS[payload.questionnaire.userMbti] ?? null;
   const targetLanguage = instructionLanguageName(payload.character.language);
   const localizedCharacterDraft = {
     ...payload.character,
-    personality: {
-      ...payload.character.personality,
-      socialEnergy: translateOption(payload.character.language, payload.character.personality.socialEnergy),
-      informationFocus: translateOption(payload.character.language, payload.character.personality.informationFocus),
-      decisionStyle: translateOption(payload.character.language, payload.character.personality.decisionStyle),
-      lifestylePace: translateOption(payload.character.language, payload.character.personality.lifestylePace)
-    }
+    mbti: personalityInferenceEnabled ? payload.character.mbti : undefined,
+    knownCharacterHandling: {
+      mode: payload.character.famousCharacterMode,
+      characterName: payload.character.famousCharacterName,
+      source: payload.character.famousCharacterSource,
+      instruction:
+        payload.character.famousCharacterMode === "known"
+          ? "Treat this as a known character. Prioritize canonical information from your existing knowledge."
+          : payload.character.famousCharacterMode === "original"
+            ? "Treat this as an original character. Do not force canon from similar famous characters."
+            : "Auto-detect whether the concept clearly points to a known character."
+    },
+    personalityInference: {
+      enabled: personalityInferenceEnabled,
+      instruction: personalityInferenceEnabled
+        ? "You may use the supplied personality axes only as a soft hint."
+        : "Do not use MBTI or personality axes as a scaffold unless the draft itself explicitly states them."
+    },
+    ...(personalityInferenceEnabled
+      ? {
+          personality: {
+            ...payload.character.personality,
+            socialEnergy: translateOption(payload.character.language, payload.character.personality.socialEnergy),
+            informationFocus: translateOption(payload.character.language, payload.character.personality.informationFocus),
+            decisionStyle: translateOption(payload.character.language, payload.character.personality.decisionStyle),
+            lifestylePace: translateOption(payload.character.language, payload.character.personality.lifestylePace)
+          }
+        }
+      : {})
   };
   const localizedUserProfile = {
     ...payload.questionnaire,
@@ -186,7 +212,12 @@ function buildUserPrompt(payload: ComposePayload) {
       requirements: [
         "Assume the user is not willing to fill a giant setting bible, but still wants enough structure to make the character coherent.",
         "Use the draft and questionnaire to infer likely speaking style, emotional tendencies, and a relationship story that feels specific.",
+        "If characterDraft.personalityInference.enabled is false, ignore MBTI-style scaffolding and derive voice, behavior, and emotional logic from the concept, world, and relationship inputs only.",
         "If characterDraft.mbti is absent, infer the role from the draft itself without trying to force an MBTI label.",
+        "Respect characterDraft.knownCharacterHandling.mode strictly: auto means decide from the concept, known means use canon aggressively, original means avoid forcing canon even if there are obvious similarities.",
+        "If characterDraft.concept clearly points to a well-known fictional or public character, treat it as a retrieval cue and reconstruct as much canonical information as you reliably know: identity, backstory, relationships, habits, speech style, aesthetics, world rules, and likely boundaries.",
+        "For well-known characters, missing draft fields are not a reason to stay generic. Fill them with canon-consistent details when reliable, and only note uncertainty when canon is genuinely ambiguous, version-dependent, or contradictory.",
+        "If characterDraft.knownCharacterHandling.characterName or source is provided, use them as the highest-priority disambiguation cue.",
         "Character.worldSetting must meaningfully shape tone, topic choices, and relationship assumptions.",
         "Relationship.dynamic and backstory should mention how they got close, why this pairing works, and a little believable tension so it feels real.",
         `relationship.affectionBaseline should explain the starting favorability level (given as a 0-100 number in affectionPlan.initialFavorability) in plain ${targetLanguage}. A low number means strangers; a high number means already close.`,
@@ -522,6 +553,7 @@ type DiscordReplyPayload = {
   tuquServiceKeyPresent?: boolean;
   tuquCharacterId?: string;
   recentMemory?: string;
+  rolesJson?: string;
   message: string;
   username: string;
 };
@@ -561,6 +593,7 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                 "Do not ask the user for their own face photo unless they explicitly say they want to generate images using their personal face.",
                 "When responding to photo or selfie requests, do not present multiple options, menus, or brainstorming lists unless the user explicitly asks for choices.",
                 "Instead, infer the single most fitting photo direction from your own character background and speak decisively.",
+                "If the user asks about other OpenClaw roles, shared cast members, or who else exists in the system, consult rolesDirectory from the provided context before answering.",
                 "If the user asks about 充值, 余额, 买点数, top up, recharge, or how to pay for image generation: tell them you can help and ask whether they want WeChat or credit card. Keep the tone casual and helpful."
               ].join(" ")
             }
@@ -585,6 +618,7 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                     characterId: payload.tuquCharacterId ?? ""
                   },
                   recentMemory: payload.recentMemory ?? "",
+                  rolesDirectory: payload.rolesJson ?? "",
                   incomingMessage: {
                     username: payload.username,
                     text: payload.message

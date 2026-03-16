@@ -180,16 +180,17 @@ async function readIfExists(filePath: string) {
 
 async function loadRoleContext(character: CharacterRecord) {
   if (character.workspacePath) {
-    const [identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory] = await Promise.all([
+    const [identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson] = await Promise.all([
       readIfExists(path.join(character.workspacePath, "IDENTITY.md")),
       readIfExists(path.join(character.workspacePath, "SOUL.md")),
       readIfExists(path.join(character.workspacePath, "USER.md")),
       readIfExists(path.join(character.workspacePath, "MEMORY.md")),
       readIfExists(path.join(character.workspacePath, "AGENTS.md")),
-      readIfExists(todayMemoryPath(character.workspacePath))
+      readIfExists(todayMemoryPath(character.workspacePath)),
+      readIfExists(path.join(character.workspacePath, "..", "ROLES.json"))
     ]);
 
-    return { identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory };
+    return { identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson };
   }
 
   return {
@@ -198,7 +199,8 @@ async function loadRoleContext(character: CharacterRecord) {
     userMd: character.blueprintPackage?.files.userMd ?? "",
     memoryMd: character.blueprintPackage?.files.memoryMd ?? "",
     agentsMd: "",
-    recentMemory: ""
+    recentMemory: "",
+    rolesJson: ""
   };
 }
 
@@ -372,6 +374,7 @@ type RoleContext = {
   memoryMd: string;
   agentsMd?: string;
   recentMemory?: string;
+  rolesJson?: string;
 };
 
 function describeTuquError(error: unknown, character?: CharacterRecord): string {

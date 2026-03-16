@@ -10,6 +10,7 @@ import {
   DiscordRuntimeConfig,
   DiscordRuntimeStatus,
   DraftCharacterInput,
+  FamousCharacterMode,
   MultiChoiceInput,
   QuestionnaireInput,
   RelationshipQuestionnaireInput,
@@ -86,6 +87,10 @@ function buildInitialDraft(language: AppLanguage): DraftCharacterInput {
     heritage: "",
     worldSetting: "当代地球",
     concept: "",
+    famousCharacterMode: "auto",
+    famousCharacterName: "",
+    famousCharacterSource: "",
+    personalityInferenceEnabled: true,
     personality: defaultCharacterPersonality,
     language,
     photos: [],
@@ -164,14 +169,37 @@ function characterAvatarSrc(character: Pick<CharacterRecord, "id" | "updatedAt">
   return `/api/characters/${character.id}/avatar${query}`;
 }
 
-function resolveCharacterMbti(character: { mbti?: string; personality: DraftCharacterInput["personality"] }) {
-  const explicit = character.mbti?.trim();
-  if (explicit) {
-    return explicit;
+function resolveCharacterMbti(character: {
+  mbti?: string;
+  personalityInferenceEnabled?: boolean;
+  personality: DraftCharacterInput["personality"];
+}) {
+  if (character.personalityInferenceEnabled === false) {
+    return "";
   }
 
   const inferred = inferMbtiFromAxes(character.personality);
-  return inferred.includes("X") ? "" : inferred;
+  if (!inferred.includes("X")) {
+    return inferred;
+  }
+
+  return character.mbti?.trim() ?? "";
+}
+
+function describeCharacterPersonality(
+  character: Pick<CharacterRecord, "mbti" | "personality" | "personalityInferenceEnabled">,
+  language: AppLanguage
+) {
+  if (character.personalityInferenceEnabled === false) {
+    return t(language, "detail.personalityInferenceDisabled");
+  }
+
+  return [
+    resolveCharacterMbti(character),
+    `${translateOption(language, character.personality.socialEnergy)} / ${translateOption(language, character.personality.informationFocus)} / ${translateOption(language, character.personality.decisionStyle)} / ${translateOption(language, character.personality.lifestylePace)}`
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function snapshotDraft(input: DraftCharacterInput) {
@@ -459,6 +487,19 @@ export function DesignerApp({
       const personality = { ...current.personality, [key]: value };
       return { ...current, personality };
     });
+  }
+
+  function handleFamousCharacterModeChange(mode: FamousCharacterMode) {
+    setDraft((current) => ({
+      ...current,
+      famousCharacterMode: mode,
+      famousCharacterName: mode === "known" ? current.famousCharacterName : "",
+      famousCharacterSource: mode === "known" ? current.famousCharacterSource : ""
+    }));
+  }
+
+  function handlePersonalityInferenceToggle(enabled: boolean) {
+    setDraft((current) => ({ ...current, personalityInferenceEnabled: enabled }));
   }
 
   function handleUserPersonalityChange(key: keyof UserProfileInput["userPersonality"], value: string) {
@@ -807,12 +848,17 @@ export function DesignerApp({
     });
     const json = (await response.json()) as {
       workspacePath?: string;
+      tuquSkillSync?: { status: "present" | "installed" | "failed"; skillPath?: string; message?: string };
       openclawRegistration?: { agentId: string; accountId: string; guildId: string };
       openclawRegistrationError?: string;
       error?: string;
     };
 
     if (!response.ok || !json.workspacePath) {
+      if (json.tuquSkillSync?.status === "failed") {
+        throw new Error(`TuQu skill 自动补装失败：${json.tuquSkillSync.message ?? json.error ?? "未知错误"}`);
+      }
+
       throw new Error(json.error ?? "同步 workspace 失败");
     }
 
@@ -836,7 +882,13 @@ export function DesignerApp({
       : json.openclawRegistrationError
         ? ` · OpenClaw 注册失败：${json.openclawRegistrationError}`
         : "";
-    const workspaceMessage = `${character.workspacePath ? "更新完成" : "创建完成"}：${json.workspacePath}${openclawNote}`;
+    const tuquSkillNote =
+      json.tuquSkillSync?.status === "installed"
+        ? " · 已自动补装 TuQu skill。"
+        : json.tuquSkillSync?.status === "present"
+          ? " · 已检查 TuQu skill。"
+          : "";
+    const workspaceMessage = `${character.workspacePath ? "更新完成" : "创建完成"}：${json.workspacePath}${tuquSkillNote}${openclawNote}`;
     setWorkspaceStatus(workspaceMessage);
 
     return { character: syncedCharacter, workspaceMessage };
@@ -1556,29 +1608,80 @@ export function DesignerApp({
             </div>
 
             <div className="field-full">
+              <label htmlFor="famous-character-mode">{t(uiLanguage, "field.famousCharacterMode")}</label>
+              <select
+                id="famous-character-mode"
+                onChange={(event) => handleFamousCharacterModeChange(event.target.value as FamousCharacterMode)}
+                value={draft.famousCharacterMode}
+              >
+                <option value="auto">{t(uiLanguage, "choice.famousCharacter.auto")}</option>
+                <option value="known">{t(uiLanguage, "choice.famousCharacter.known")}</option>
+                <option value="original">{t(uiLanguage, "choice.famousCharacter.original")}</option>
+              </select>
+              <div className="inline-note">{t(uiLanguage, "field.famousCharacterHelp")}</div>
+            </div>
+
+            {draft.famousCharacterMode === "known" ? (
+              <>
+                <div className="field">
+                  <label htmlFor="famous-character-name">{t(uiLanguage, "field.famousCharacterName")}</label>
+                  <input
+                    id="famous-character-name"
+                    onChange={(event) => handleDraftChange("famousCharacterName", event.target.value)}
+                    placeholder={t(uiLanguage, "placeholder.famousCharacterName")}
+                    value={draft.famousCharacterName}
+                  />
+                </div>
+
+                <div className="field">
+                  <label htmlFor="famous-character-source">{t(uiLanguage, "field.famousCharacterSource")}</label>
+                  <input
+                    id="famous-character-source"
+                    onChange={(event) => handleDraftChange("famousCharacterSource", event.target.value)}
+                    placeholder={t(uiLanguage, "placeholder.famousCharacterSource")}
+                    value={draft.famousCharacterSource}
+                  />
+                </div>
+              </>
+            ) : null}
+
+            <div className="field-full">
               <label>{t(uiLanguage, "field.personality")}</label>
-              <div className="option-grid">
-                {(Object.keys(PERSONALITY_AXIS_OPTIONS) as Array<keyof typeof PERSONALITY_AXIS_OPTIONS>).map((key) => (
-                  <div className="option-card" key={key}>
-                    <span className="option-title">{axisLabel(key, true, uiLanguage)}</span>
-                    <select
-                      onChange={(event) => handleCharacterPersonalityChange(key, event.target.value)}
-                      value={draft.personality[key]}
-                    >
-                      {PERSONALITY_AXIS_OPTIONS[key].map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {translateOption(uiLanguage, option.value)}
-                        </option>
-                      ))}
-                    </select>
+              <label className="checkbox-item" style={{ width: "fit-content" }}>
+                <input
+                  checked={draft.personalityInferenceEnabled}
+                  onChange={(event) => handlePersonalityInferenceToggle(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>{t(uiLanguage, "field.personalityInferenceToggle")}</span>
+              </label>
+              <div className="inline-note">{t(uiLanguage, "field.personalityInferenceHelp")}</div>
+              {draft.personalityInferenceEnabled ? (
+                <>
+                  <div className="option-grid">
+                    {(Object.keys(PERSONALITY_AXIS_OPTIONS) as Array<keyof typeof PERSONALITY_AXIS_OPTIONS>).map((key) => (
+                      <div className="option-card" key={key}>
+                        <span className="option-title">{axisLabel(key, true, uiLanguage)}</span>
+                        <select
+                          onChange={(event) => handleCharacterPersonalityChange(key, event.target.value)}
+                          value={draft.personality[key]}
+                        >
+                          {PERSONALITY_AXIS_OPTIONS[key].map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {translateOption(uiLanguage, option.value)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <textarea
-                onChange={(event) => handleCharacterPersonalityChange("otherNotes", event.target.value)}
-                placeholder={t(uiLanguage, "placeholder.characterNotes")}
-                value={draft.personality.otherNotes}
-              />
+                  <textarea
+                    onChange={(event) => handleCharacterPersonalityChange("otherNotes", event.target.value)}
+                    placeholder={t(uiLanguage, "placeholder.characterNotes")}
+                    value={draft.personality.otherNotes}
+                  />
+                </>
+              ) : null}
             </div>
 
             <div className="field-full">
@@ -1616,20 +1719,29 @@ export function DesignerApp({
           </div>
 
           <div className="hint-box">
-            <strong>{inferredCharacterMbti}</strong>
-            <p style={{ marginBottom: 8 }}>
-              {activePreset
-                ? `${activePreset.title}${uiLanguage === "en" ? ": " : "："}${activePreset.defaults.join(
-                    uiLanguage === "en" ? ", " : "、"
-                  )}。`
-                : t(uiLanguage, "detail.mbtiInsufficient")}
-            </p>
-            {activePreset ? (
-              <span className="footer-note">
-                {t(uiLanguage, "detail.rhythm")}
-                {activePreset.rhythm}
-              </span>
-            ) : null}
+            {draft.personalityInferenceEnabled ? (
+              <>
+                <strong>{inferredCharacterMbti}</strong>
+                <p style={{ marginBottom: 8 }}>
+                  {activePreset
+                    ? `${activePreset.title}${uiLanguage === "en" ? ": " : "："}${activePreset.defaults.join(
+                        uiLanguage === "en" ? ", " : "、"
+                      )}。`
+                    : t(uiLanguage, "detail.mbtiInsufficient")}
+                </p>
+                {activePreset ? (
+                  <span className="footer-note">
+                    {t(uiLanguage, "detail.rhythm")}
+                    {activePreset.rhythm}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <strong>{t(uiLanguage, "detail.personalityInferenceDisabled")}</strong>
+                <p style={{ marginBottom: 0 }}>{t(uiLanguage, "detail.personalityInferenceDisabledHelp")}</p>
+              </>
+            )}
           </div>
 
           <div className="footer-note">{t(uiLanguage, "profile.footer")}</div>
@@ -1905,14 +2017,7 @@ export function DesignerApp({
 
                   <div className="detail-browse-section">
                     <h4>{t(uiLanguage, "detail.personality")}</h4>
-                    <p>
-                      {[
-                        selectedMbti,
-                        `${translateOption(uiLanguage, selected.personality.socialEnergy)} / ${translateOption(uiLanguage, selected.personality.informationFocus)} / ${translateOption(uiLanguage, selected.personality.decisionStyle)} / ${translateOption(uiLanguage, selected.personality.lifestylePace)}`
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
+                    <p>{describeCharacterPersonality(selected, uiLanguage)}</p>
                   </div>
 
                   {selected.blueprintPackage ? (
@@ -2002,15 +2107,10 @@ export function DesignerApp({
 
                 <div className="detail-card">
                   <h4>{t(uiLanguage, "detail.personality")}</h4>
-                  <p>
-                    {[
-                      selectedMbti,
-                      `${translateOption(uiLanguage, selected.personality.socialEnergy)} / ${translateOption(uiLanguage, selected.personality.informationFocus)} / ${translateOption(uiLanguage, selected.personality.decisionStyle)} / ${translateOption(uiLanguage, selected.personality.lifestylePace)}`
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                  {selected.personality.otherNotes ? <p>{selected.personality.otherNotes}</p> : null}
+                  <p>{describeCharacterPersonality(selected, uiLanguage)}</p>
+                  {selected.personalityInferenceEnabled !== false && selected.personality.otherNotes ? (
+                    <p>{selected.personality.otherNotes}</p>
+                  ) : null}
                   {emotionalHabits.length ? (
                     <>
                       <h4>{t(uiLanguage, "detail.emotionalHabits")}</h4>
@@ -2529,7 +2629,11 @@ function draftFromCharacter(character: CharacterRecord): DraftCharacterInput {
     heritage: character.heritage,
     worldSetting: character.worldSetting,
     concept: character.concept,
+    famousCharacterMode: character.famousCharacterMode ?? "auto",
+    famousCharacterName: character.famousCharacterName ?? "",
+    famousCharacterSource: character.famousCharacterSource ?? "",
     mbti: character.mbti,
+    personalityInferenceEnabled: character.personalityInferenceEnabled !== false,
     personality: { ...character.personality },
     language: character.language,
     photos: [...character.photos],

@@ -10,6 +10,10 @@ const draftWithoutMbti: DraftCharacterInput = {
   heritage: "外星人",
   worldSetting: "福星小子",
   concept: "热烈又黏人的知名角色",
+  famousCharacterMode: "known",
+  famousCharacterName: "拉姆",
+  famousCharacterSource: "福星小子",
+  personalityInferenceEnabled: true,
   personality: {
     socialEnergy: "靠和人互动回血",
     informationFocus: "更关注可能性和脑洞",

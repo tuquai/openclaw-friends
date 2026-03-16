@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCharacter, updateCharacter } from "@/lib/data";
+import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
 import { registerCharacterInOpenClaw } from "@/lib/openclaw-register";
-import { createWorkspaceFromCharacter } from "@/lib/workspace";
+import { createWorkspaceFromCharacter, syncOpenClawRolesFile } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const workspacePath = await createWorkspaceFromCharacter(character);
+    const { workspacePath, tuquSkillSync } = await createWorkspaceFromCharacter(character);
     const updated = await updateCharacter(character.id, {
       workspacePath,
       discordLink: character.discordLink
@@ -43,10 +43,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ workspacePath, openclawRegistration, openclawRegistrationError });
+    await syncOpenClawRolesFile(await listCharacters());
+
+    return NextResponse.json({ workspacePath, tuquSkillSync, openclawRegistration, openclawRegistrationError });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    const tuquSkillSync: { status: "failed"; message: string } | null =
+      message.includes("TuQu skill") || message.includes("Bundled TuQu skill")
+        ? {
+            status: "failed",
+            message
+          }
+        : null;
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      { error: message, tuquSkillSync },
       { status: 500 }
     );
   }

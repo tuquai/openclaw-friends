@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { importWorkspaceAsCharacter } from "@/lib/workspace";
+import { listCharacters } from "@/lib/data";
+import { importWorkspaceAsCharacter, syncOpenClawRolesFile } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const character = await importWorkspaceAsCharacter(payload.workspacePath);
+    await syncOpenClawRolesFile(await listCharacters());
     return NextResponse.json({ character });
   } catch (error) {
     return NextResponse.json(

@@ -5,8 +5,37 @@ import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 import { normalizeLanguage } from "@/lib/i18n";
 
+const TUQU_SKILL_NAME = "tuqu-photo-api";
+
+export type TuquSkillSyncResult = {
+  status: "present" | "installed";
+  skillPath: string;
+};
+
+type WorkspaceAssociate = {
+  characterName: string;
+  tuquCharacterId: string;
+};
+
+type SharedRoleEntry = Omit<CharacterRecord, "discordLink" | "tuquConfig"> & {
+  tuquConfig?: Omit<TuquConfig, "serviceKey">;
+  associates: WorkspaceAssociate[];
+};
+
 function getWorkspaceRoot() {
   return resolveOptionalPathEnv(process.env.OPENCLAW_WORKSPACE_ROOT, path.join(os.homedir(), ".openclaw"));
+}
+
+function getBundledTuquSkillPath() {
+  return path.join(process.cwd(), "skills", TUQU_SKILL_NAME);
+}
+
+function getInstalledTuquSkillPath() {
+  return path.join(getWorkspaceRoot(), "skills", TUQU_SKILL_NAME);
+}
+
+function getBundledWorkspaceToolPath(dirName: string) {
+  return path.join(process.cwd(), "workspace-tools", dirName);
 }
 
 function slugify(value: string) {
@@ -39,6 +68,7 @@ Before doing anything else:
 2. Read \`USER.md\` — this is who you're helping
 3. Read \`memory/YYYY-MM-DD.md\` (today + yesterday) for recent context
 4. **If in MAIN SESSION** (direct chat with your human): Also read \`MEMORY.md\`
+5. If \`../SKILL_ROUTE.md\` exists and the task touches images, recharge, or other shared tool routing, read it too
 
 Don't ask permission. Just do it.
 
@@ -102,41 +132,11 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 
 ## Tools
 
-Skills live at \`~/.openclaw/skills/\`. When you need one, read its \`SKILL.md\`. Keep local notes in \`TOOLS.md\`.
-
-### Task Routing
-
-| Task type | Where to look |
-|-----------|---------------|
-| Image generation / TUQU photo API | \`~/.openclaw/skills/tuqu-photo-api/SKILL.md\` |
-| Discord gateway issues | \`openclaw-gateway-recovery/SKILL.md\` (in this workspace) |
-| Everything else (browser, messages, etc.) | Use native tools directly |
-
-### Image Generation Routing
-
-Read \`~/.openclaw/skills/tuqu-photo-api/SKILL.md\` for full API reference, then pick the right endpoint:
-
-| User intent | Endpoint |
-|-------------|----------|
-| Named preset: 明朝汉服, 吉卜力, 杂志封面, etc. | \`GET /api/catalog\` → \`POST /api/v2/apply-preset\` |
-| Free creation, no preset mentioned | \`POST /api/v2/generate-image\` |
-| ${name} must be recognizable in the photo | \`POST /api/v2/generate-for-character\` (needs characterId) |
-| 充值, 余额, INSUFFICIENT_BALANCE | Recharge flow in the same skill |
+Keep local notes in \`TOOLS.md\`. Shared routing rules, if present, live in \`../SKILL_ROUTE.md\`.
 
 ### Service Key
 
 TUQU API calls need the service key from \`tuqu_service_key.txt\` in this workspace. If missing, guide the user to register at the TuQu billing page or configure it in the UI's TuQu settings.
-
-### Character Creation
-
-If character-consistent photos are needed but \`tuqu_character.json\` is missing:
-
-1. Read \`.openclaw/character-photo-profile.json\` for ${name}'s physical description
-2. Read \`profile.jpeg\` (or \`profile.jpg\`/\`profile.png\`) and encode as base64 data URL
-3. Call \`POST /api/characters\` with \`name\`, \`photoBase64\`, and \`description\` fields
-4. Save the returned \`_id\` to \`tuqu_character.json\` as \`{ "characterId": "...", "characterName": "..." }\`
-
-Then use that \`characterId\` with \`POST /api/v2/generate-for-character\`.
 
 ### Media Rules
 
@@ -153,6 +153,41 @@ function staticToolsMd() {
   return `# TOOLS.md - Local Notes
 
 Write environment-specific notes here when needed.
+`;
+}
+
+function staticSkillRouteMd() {
+  return `# SKILL_ROUTE.md
+
+Shared task-routing rules for OpenClaw character workspaces. Read this when the task touches images, recharge, or other shared tools.
+
+## Route Map
+
+| Task type | Where to look |
+|-----------|---------------|
+| The current character's own selfie / portrait / visible-in-frame photo | \`character-selfie/SKILL.md\` |
+| Scenery, objects, image edits, templates, or styles | \`tuqu-catalog/SKILL.md\` |
+| Low-level TUQU API reference | \`~/.openclaw/skills/tuqu-photo-api/SKILL.md\` |
+| Discord gateway issues | \`openclaw-gateway-recovery/SKILL.md\` |
+| Everything else | Use native tools directly |
+
+## Selfie Rules
+
+- If the user asks for the current character's own 自拍、照片、写真、发张图, generate that character's photo.
+- Do not ask for the user's face photo unless the user explicitly wants themselves to appear in the image.
+- Treat 自拍 as image-generation ability, not literal phone ownership.
+- For a normal 自拍, default to front-camera framing with the device out of frame unless the user explicitly wants a mirror shot or visible phone.
+
+## Other Roles
+
+- Read \`../ROLES.json\` when you need to know other OpenClaw roles in the system.
+- Each role entry includes that role's shared profile snapshot plus its \`associates\`.
+- Read \`ASSOCIATES.json\` inside your own workspace when the question is about your current project's cast rather than the whole OpenClaw role directory.
+
+## Media Rules
+
+- Send remote TUQU image URLs directly as media attachments. Do not download them to local files first.
+- After each TUQU API call, log key info in \`memory/YYYY-MM-DD.md\`.
 `;
 }
 
@@ -186,6 +221,30 @@ function buildWorkspaceState(character: CharacterRecord) {
     characterName: character.name,
     workspacePath: character.workspacePath ?? null
   };
+}
+
+function normalizeAssociates(raw: unknown): WorkspaceAssociate[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const candidate = entry as Partial<WorkspaceAssociate>;
+      const characterName = candidate.characterName?.trim();
+      const tuquCharacterId = candidate.tuquCharacterId?.trim();
+
+      if (!characterName || !tuquCharacterId) {
+        return null;
+      }
+
+      return { characterName, tuquCharacterId };
+    })
+    .filter((entry): entry is WorkspaceAssociate => Boolean(entry));
 }
 
 function buildTuquConfigPayload(character: CharacterRecord, workspacePath: string) {
@@ -294,6 +353,65 @@ async function writeWorkspaceFiles(character: CharacterRecord, workspacePath: st
   await fs.writeFile(path.join(workspacePath, "MEMORY.md"), character.blueprintPackage?.files.memoryMd ?? "", "utf8");
 }
 
+async function writeAssociatesFile(workspacePath: string, associates: WorkspaceAssociate[] = []) {
+  await fs.writeFile(
+    path.join(workspacePath, "ASSOCIATES.json"),
+    JSON.stringify(associates, null, 2),
+    "utf8"
+  );
+}
+
+async function readAssociatesFile(workspacePath: string): Promise<WorkspaceAssociate[]> {
+  try {
+    const raw = JSON.parse(await fs.readFile(path.join(workspacePath, "ASSOCIATES.json"), "utf8")) as unknown;
+    return normalizeAssociates(raw);
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeRoleEntry(character: CharacterRecord, associates: WorkspaceAssociate[]): SharedRoleEntry {
+  const { discordLink: _discordLink, tuquConfig, ...rest } = character;
+
+  return {
+    ...rest,
+    tuquConfig: tuquConfig
+      ? {
+          registrationUrl: tuquConfig.registrationUrl,
+          characterId: tuquConfig.characterId,
+          updatedAt: tuquConfig.updatedAt
+        }
+      : undefined,
+    associates
+  };
+}
+
+export async function syncOpenClawRolesFile(characters: CharacterRecord[]) {
+  const roles = await Promise.all(
+    characters
+      .filter((character) => Boolean(character.workspacePath))
+      .map(async (character) => {
+        const associates = character.workspacePath ? await readAssociatesFile(character.workspacePath) : [];
+        return sanitizeRoleEntry(character, associates);
+      })
+  );
+
+  await fs.mkdir(getWorkspaceRoot(), { recursive: true });
+  await fs.writeFile(
+    path.join(getWorkspaceRoot(), "ROLES.json"),
+    JSON.stringify(
+      {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        roles: roles.sort((left, right) => left.name.localeCompare(right.name))
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+}
+
 
 function buildGatewayRecoverySkillMd() {
   return `# OpenClaw Gateway Recovery
@@ -377,6 +495,68 @@ async function installCharacterPhotoProfile(character: CharacterRecord, workspac
   );
 }
 
+async function installBundledWorkspaceTool(workspacePath: string, dirName: string) {
+  const sourceRoot = getBundledWorkspaceToolPath(dirName);
+  const sourceSkill = path.join(sourceRoot, "SKILL.md");
+  const targetRoot = path.join(workspacePath, dirName);
+
+  if (!(await fileExists(sourceSkill))) {
+    throw new Error(`Bundled workspace tool is missing: ${sourceSkill}`);
+  }
+
+  await fs.mkdir(targetRoot, { recursive: true });
+  await fs.cp(sourceRoot, targetRoot, { recursive: true, force: true });
+}
+
+async function installWorkspaceImageTools(workspacePath: string) {
+  await installBundledWorkspaceTool(workspacePath, "character-selfie");
+  await installBundledWorkspaceTool(workspacePath, "tuqu-catalog");
+}
+
+function sharedSkillRouteMarkerPath(workspacePath: string) {
+  return path.join(workspacePath, ".openclaw", "shared-skill-route.enabled");
+}
+
+async function installSharedSkillRouteFile() {
+  await fs.mkdir(getWorkspaceRoot(), { recursive: true });
+  await fs.writeFile(path.join(getWorkspaceRoot(), "SKILL_ROUTE.md"), staticSkillRouteMd(), "utf8");
+}
+
+async function markWorkspaceUsesSharedSkillRoute(workspacePath: string) {
+  await fs.writeFile(sharedSkillRouteMarkerPath(workspacePath), "shared-root\n", "utf8");
+}
+
+export async function ensureTuquPhotoSkillInstalled(): Promise<TuquSkillSyncResult> {
+  const sourceRoot = getBundledTuquSkillPath();
+  const targetRoot = getInstalledTuquSkillPath();
+  const sourceEntry = path.join(sourceRoot, "SKILL.md");
+  const targetEntry = path.join(targetRoot, "SKILL.md");
+
+  if (await fileExists(targetEntry)) {
+    return {
+      status: "present",
+      skillPath: targetRoot
+    };
+  }
+
+  if (!(await fileExists(sourceEntry))) {
+    throw new Error(`Bundled TuQu skill is missing: ${sourceEntry}`);
+  }
+
+  await fs.mkdir(path.dirname(targetRoot), { recursive: true });
+  await fs.rm(targetRoot, { recursive: true, force: true });
+  await fs.cp(sourceRoot, targetRoot, { recursive: true, force: true });
+
+  if (!(await fileExists(targetEntry))) {
+    throw new Error(`Failed to install TuQu skill to ${targetRoot}`);
+  }
+
+  return {
+    status: "installed",
+    skillPath: targetRoot
+  };
+}
+
 export function getWorkspaceRootPath() {
   return getWorkspaceRoot();
 }
@@ -430,6 +610,8 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
     throw new Error("Character is missing blueprint package");
   }
 
+  const tuquSkillSync = await ensureTuquPhotoSkillInstalled();
+
   const workspaceRoot = getWorkspaceRoot();
   const dirName = `workspace-${slugify(character.name)}-${character.id.slice(0, 8)}`;
   const workspacePath = character.workspacePath || path.join(workspaceRoot, dirName);
@@ -445,10 +627,14 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
 
   await writeWorkspaceFiles(character, workspacePath);
   await installCharacterPhotoProfile(character, workspacePath);
+  await installWorkspaceImageTools(workspacePath);
   await installGatewayRecoverySkill(workspacePath);
   await fs.writeFile(path.join(workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
+  await installSharedSkillRouteFile();
+  await markWorkspaceUsesSharedSkillRoute(workspacePath);
   await fs.writeFile(path.join(workspacePath, "TOOLS.md"), staticToolsMd(), "utf8");
   await fs.writeFile(path.join(workspacePath, "HEARTBEAT.md"), staticHeartbeatMd(), "utf8");
+  await writeAssociatesFile(workspacePath, []);
   const workspaceCharacter: CharacterRecord = {
     ...character,
     workspacePath
@@ -477,7 +663,10 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
     "utf8"
   );
 
-  return workspacePath;
+  return {
+    workspacePath,
+    tuquSkillSync
+  };
 }
 
 export async function syncWorkspaceDiscordLink(character: CharacterRecord) {
@@ -498,15 +687,30 @@ export async function syncWorkspaceTuquConfig(character: CharacterRecord) {
   await writeTuquFiles(character, character.workspacePath);
 }
 
+export async function syncWorkspaceAssociates(character: CharacterRecord) {
+  if (!character.workspacePath) {
+    return;
+  }
+
+  const associates = await readAssociatesFile(character.workspacePath);
+  await writeAssociatesFile(character.workspacePath, associates);
+}
+
 export async function syncWorkspaceSkills(character: CharacterRecord) {
   if (!character.workspacePath) {
     return;
   }
 
+  await ensureTuquPhotoSkillInstalled();
   await fs.mkdir(path.join(character.workspacePath, ".openclaw"), { recursive: true });
   await installCharacterPhotoProfile(character, character.workspacePath);
   await installGatewayRecoverySkill(character.workspacePath);
-  await fs.writeFile(path.join(character.workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
+
+  if (await fileExists(sharedSkillRouteMarkerPath(character.workspacePath))) {
+    await installSharedSkillRouteFile();
+    await installWorkspaceImageTools(character.workspacePath);
+    await fs.writeFile(path.join(character.workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
+  }
 }
 
 export async function syncWorkspaceFiles(character: CharacterRecord) {
@@ -778,6 +982,8 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
   }
 
   const now = new Date().toISOString();
+  const personalityInferenceEnabled =
+    (base as { personalityInferenceEnabled?: boolean }).personalityInferenceEnabled !== false;
   const record: CharacterRecord = {
     id: base.id ?? crypto.randomUUID(),
     name: base.name ?? "未命名角色",
@@ -787,7 +993,14 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
     heritage: base.heritage ?? "",
     worldSetting: base.worldSetting ?? "当代地球",
     concept: base.concept ?? "",
-    mbti: base.mbti ?? undefined,
+    famousCharacterMode:
+      base.famousCharacterMode === "known" || base.famousCharacterMode === "original"
+        ? base.famousCharacterMode
+        : "auto",
+    famousCharacterName: typeof base.famousCharacterName === "string" ? base.famousCharacterName : "",
+    famousCharacterSource: typeof base.famousCharacterSource === "string" ? base.famousCharacterSource : "",
+    mbti: personalityInferenceEnabled ? base.mbti ?? undefined : undefined,
+    personalityInferenceEnabled,
     personality: base.personality ?? {
       socialEnergy: "",
       informationFocus: "",

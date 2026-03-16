@@ -10,6 +10,7 @@ import {
   CharacterRecord,
   DiscordLink,
   DraftCharacterInput,
+  FamousCharacterMode,
   PersonalityAxes,
   RelationshipQuestionnaireInput,
   TuquConfig,
@@ -238,8 +239,22 @@ function normalizePersonality(raw?: Partial<PersonalityAxes>, fallbackMbti?: str
   };
 }
 
+function normalizePersonalityInferenceEnabled(raw: unknown) {
+  return raw !== false;
+}
+
+function normalizeFamousCharacterMode(raw: unknown): FamousCharacterMode {
+  return raw === "known" || raw === "original" ? raw : "auto";
+}
+
 function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
   const personality = normalizePersonality(raw.personality, raw.mbti);
+  const personalityInferenceEnabled = normalizePersonalityInferenceEnabled(
+    (raw as { personalityInferenceEnabled?: unknown }).personalityInferenceEnabled
+  );
+  const famousCharacterMode = normalizeFamousCharacterMode(
+    (raw as { famousCharacterMode?: unknown }).famousCharacterMode
+  );
   const conceptParts = [raw.concept, raw.vibe, raw.notes].filter(
     (value): value is string => typeof value === "string" && Boolean(value.trim())
   );
@@ -258,7 +273,15 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     heritage: raw.heritage ?? "",
     worldSetting: raw.worldSetting ?? "当代地球",
     concept: conceptParts.join("\n\n"),
-    mbti: raw.mbti ?? undefined,
+    famousCharacterMode,
+    famousCharacterName: typeof (raw as { famousCharacterName?: unknown }).famousCharacterName === "string"
+      ? (raw as { famousCharacterName: string }).famousCharacterName
+      : "",
+    famousCharacterSource: typeof (raw as { famousCharacterSource?: unknown }).famousCharacterSource === "string"
+      ? (raw as { famousCharacterSource: string }).famousCharacterSource
+      : "",
+    mbti: personalityInferenceEnabled ? raw.mbti ?? undefined : undefined,
+    personalityInferenceEnabled,
     personality,
     language: normalizeLanguage((raw as { language?: string }).language),
     photos: Array.isArray(raw.photos) ? raw.photos : [],
@@ -486,7 +509,10 @@ async function readCharacters() {
 
 function buildCharacterPatch(input: DraftCharacterInput): Omit<CharacterRecord, "id" | "createdAt" | "updatedAt"> {
   const personality = normalizePersonality(input.personality, input.mbti);
-  const mbti = input.mbti?.trim();
+  const personalityInferenceEnabled = normalizePersonalityInferenceEnabled(input.personalityInferenceEnabled);
+  const inferredMbti = personalityInferenceEnabled ? inferMbtiFromAxes(personality) : "";
+  const mbti = inferredMbti && !inferredMbti.includes("X") ? inferredMbti : undefined;
+  const famousCharacterMode = normalizeFamousCharacterMode(input.famousCharacterMode);
 
   return {
     name: input.name,
@@ -496,7 +522,11 @@ function buildCharacterPatch(input: DraftCharacterInput): Omit<CharacterRecord, 
     heritage: input.heritage,
     worldSetting: input.worldSetting,
     concept: input.concept,
-    mbti: mbti ? mbti : undefined,
+    famousCharacterMode,
+    famousCharacterName: famousCharacterMode === "known" ? input.famousCharacterName.trim() : "",
+    famousCharacterSource: famousCharacterMode === "known" ? input.famousCharacterSource.trim() : "",
+    mbti,
+    personalityInferenceEnabled,
     personality,
     language: normalizeLanguage(input.language),
     photos: input.photos,

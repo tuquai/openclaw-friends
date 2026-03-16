@@ -45,7 +45,7 @@ function throwTuquError(json: TuquGenerateResponse, httpStatus: number): never {
 }
 
 export async function generateCharacterImage(payload: GenerateCharacterPayload): Promise<string> {
-  const response = await fetch(`${TUQU_API_BASE}/api/generate-character`, {
+  const response = await fetch(`${TUQU_API_BASE}/api/v2/generate-for-character`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -54,7 +54,7 @@ export async function generateCharacterImage(payload: GenerateCharacterPayload):
       prompt: payload.sceneDescription,
       resolution: payload.resolution ?? "2K",
       ratio: payload.ratio ?? "3:4",
-      model: payload.model ?? "seedream45"
+      modelId: payload.model ?? "seedream45"
     })
   });
 
@@ -67,7 +67,7 @@ export async function generateCharacterImage(payload: GenerateCharacterPayload):
 }
 
 export async function generateFreestyleImage(payload: GenerateFreestylePayload): Promise<string> {
-  const response = await fetch(`${TUQU_API_BASE}/api/generate-freestyle`, {
+  const response = await fetch(`${TUQU_API_BASE}/api/v2/generate-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -76,7 +76,7 @@ export async function generateFreestyleImage(payload: GenerateFreestylePayload):
       referenceImageUrls: payload.referenceImageUrls,
       resolution: payload.resolution ?? "2K",
       ratio: payload.ratio ?? "3:4",
-      model: payload.model ?? "seedream45"
+      modelId: payload.model ?? "seedream45"
     })
   });
 

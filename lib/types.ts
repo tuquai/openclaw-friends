@@ -8,6 +8,8 @@ export type PersonalityAxes = {
   otherNotes: string;
 };
 
+export type FamousCharacterMode = "auto" | "known" | "original";
+
 export type SingleChoiceInput = {
   selected: string;
   custom: string;
@@ -115,7 +117,11 @@ export type CharacterRecord = {
   heritage: string;
   worldSetting: string;
   concept: string;
+  famousCharacterMode: FamousCharacterMode;
+  famousCharacterName: string;
+  famousCharacterSource: string;
   mbti?: string;
+  personalityInferenceEnabled: boolean;
   personality: PersonalityAxes;
   language: AppLanguage;
   photos: string[];
@@ -137,7 +143,11 @@ export type DraftCharacterInput = {
   heritage: string;
   worldSetting: string;
   concept: string;
+  famousCharacterMode: FamousCharacterMode;
+  famousCharacterName: string;
+  famousCharacterSource: string;
   mbti?: string;
+  personalityInferenceEnabled: boolean;
   personality: PersonalityAxes;
   language: AppLanguage;
   photos: string[];
