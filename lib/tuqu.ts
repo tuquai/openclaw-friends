@@ -1,5 +1,7 @@
 const TUQU_API_BASE = "https://photo.tuqu.ai";
 const BILLING_API_BASE = "https://billing.tuqu.ai/api/v1/recharge";
+const DEFAULT_TUQU_MODEL_ID = "nanobanana_2";
+const DEFAULT_ENHANCE_CATEGORY = "portrait";
 
 type GenerateCharacterPayload = {
   userKey: string;
@@ -25,6 +27,10 @@ type TuquGenerateResponse = {
   error?: { message?: string; code?: string };
 };
 
+type TuquEnhancePromptResponse = {
+  enhancedPrompt?: string;
+};
+
 export class TuquApiError extends Error {
   code: string;
   remainingBalance?: number;
@@ -44,17 +50,40 @@ function throwTuquError(json: TuquGenerateResponse, httpStatus: number): never {
   throw new TuquApiError(code, message, typeof balance === "number" ? balance : undefined);
 }
 
+async function enhancePrompt(prompt: string): Promise<string> {
+  try {
+    const response = await fetch(`${TUQU_API_BASE}/api/enhance-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: DEFAULT_ENHANCE_CATEGORY,
+        prompt
+      })
+    });
+
+    if (!response.ok) {
+      return prompt;
+    }
+
+    const json = (await response.json()) as TuquEnhancePromptResponse;
+    return json.enhancedPrompt?.trim() || prompt;
+  } catch {
+    return prompt;
+  }
+}
+
 export async function generateCharacterImage(payload: GenerateCharacterPayload): Promise<string> {
+  const prompt = await enhancePrompt(payload.sceneDescription);
   const response = await fetch(`${TUQU_API_BASE}/api/v2/generate-for-character`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userKey: payload.userKey,
       characterIds: payload.characterIds,
-      prompt: payload.sceneDescription,
+      prompt,
       resolution: payload.resolution ?? "2K",
       ratio: payload.ratio ?? "3:4",
-      modelId: payload.model ?? "seedream45"
+      modelId: payload.model ?? DEFAULT_TUQU_MODEL_ID
     })
   });
 
@@ -67,16 +96,17 @@ export async function generateCharacterImage(payload: GenerateCharacterPayload):
 }
 
 export async function generateFreestyleImage(payload: GenerateFreestylePayload): Promise<string> {
+  const prompt = await enhancePrompt(payload.prompt);
   const response = await fetch(`${TUQU_API_BASE}/api/v2/generate-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userKey: payload.userKey,
-      prompt: payload.prompt,
+      prompt,
       referenceImageUrls: payload.referenceImageUrls,
       resolution: payload.resolution ?? "2K",
       ratio: payload.ratio ?? "3:4",
-      modelId: payload.model ?? "seedream45"
+      modelId: payload.model ?? DEFAULT_TUQU_MODEL_ID
     })
   });
 
