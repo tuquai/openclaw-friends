@@ -5,7 +5,7 @@ import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 import { normalizeLanguage } from "@/lib/i18n";
 
-const TUQU_SKILL_NAME = "tuqu-photo-api";
+const TUQU_SKILL_NAME = "tuqu-photo-skill";
 
 export type TuquSkillSyncResult = {
   status: "present" | "installed";
@@ -143,6 +143,15 @@ TUQU API calls need the service key from \`tuqu_service_key.txt\` in this worksp
 - Send the remote TUQU image URL directly as a media attachment. Do not download to local files.
 - After each TUQU API call, log key info (endpoint, imageUrl, balance, transactionId) in \`memory/YYYY-MM-DD.md\`.
 
+### Image Generation
+
+When generating an image for a character (e.g., via TUQU API), you MUST first use the following logic to generate a "Prompt for Generating the Image":
+
+- Use the character's details (SOUL.md) and current scene context.
+- Follow the rules: Chinese only, 150-400 words, high visual detail (lighting, lens, textures), cinematic and vivid style.
+- The output should be ONLY the final Chinese prompt string, ready to be sent to the generation tool.
+- Refer to \`prompt.md\` (if available in your root environment) for the full meta-prompt logic on how to optimize these prompts.
+
 ## Make It Yours
 
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
@@ -167,7 +176,7 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 |-----------|---------------|
 | The current character's own selfie / portrait / visible-in-frame photo | \`character-selfie/SKILL.md\` |
 | Scenery, objects, image edits, templates, or styles | \`tuqu-catalog/SKILL.md\` |
-| Low-level TUQU API reference | \`~/.openclaw/skills/tuqu-photo-api/SKILL.md\` |
+| Low-level TUQU API reference | \`~/.openclaw/skills/tuqu-photo-skill/SKILL.md\` |
 | Discord gateway issues | \`openclaw-gateway-recovery/SKILL.md\` |
 | Everything else | Use native tools directly |
 
@@ -188,6 +197,16 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 
 - Send remote TUQU image URLs directly as media attachments. Do not download them to local files first.
 - After each TUQU API call, log key info in \`memory/YYYY-MM-DD.md\`.
+
+## Prompt Design
+
+When you need to generate a new image prompt for the TUQU API, use these optimization rules to construct the final Chinese prompt string:
+
+1. **Focus:** Character (name, age, features, outfit, mood) + Scene (location, action, lighting, vibe).
+2. **Style:** Cinematic, vivid, high-quality, and detailed. Avoid simple keyword stacking; use natural but descriptive language.
+3. **Refinement:** Include specific visual details like lens choice, lighting direction, background depth, and textures.
+4. **Length:** Aim for 150-400 characters (max 500).
+5. **Output:** Return ONLY the final Chinese prompt string. No headers, quotes, or explanations.
 `;
 }
 

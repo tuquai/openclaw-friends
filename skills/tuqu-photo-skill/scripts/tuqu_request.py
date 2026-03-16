@@ -67,6 +67,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json", help="Inline JSON body string")
     parser.add_argument("--body-file", help="Path to a JSON file used as the request body")
     parser.add_argument(
+        "--service-key",
+        help=(
+            "Credential supplied explicitly by the caller for authenticated endpoints. "
+            "The helper maps it to body userKey, header x-api-key, or bearer auth "
+            "based on the endpoint."
+        ),
+    )
+    parser.add_argument(
         "--auth-mode",
         choices=("auto", "none", "user-key", "api-key", "service-key"),
         default="auto",
@@ -139,14 +147,14 @@ def resolve_query_value(query_items: list[tuple[str, str]], key: str) -> str | N
     return None
 
 
-def resolve_env_value() -> str | None:
-    value = os.environ.get("TUQU_USER_SERVICE_KEY")
-    if value:
-        return value
-    return None
+def resolve_service_key(
+    explicit_service_key: str | None,
+    body: Any | None,
+    query_items: list[tuple[str, str]],
+) -> str | None:
+    if explicit_service_key:
+        return explicit_service_key
 
-
-def resolve_service_key(body: Any | None, query_items: list[tuple[str, str]]) -> str | None:
     if isinstance(body, dict):
         for key in ("serviceKey", "userKey"):
             value = body.get(key)
@@ -158,10 +166,10 @@ def resolve_service_key(body: Any | None, query_items: list[tuple[str, str]]) ->
         if query_value:
             return query_value
 
-    return resolve_env_value()
+    return None
 
 
-def prepare_body(auth_mode: str, body: Any | None) -> Any | None:
+def prepare_body(auth_mode: str, body: Any | None, service_key: str | None = None) -> Any | None:
     if auth_mode == "service-key":
         if body is None:
             return None
@@ -181,13 +189,11 @@ def prepare_body(auth_mode: str, body: Any | None) -> Any | None:
         raise ValueError("Body-auth endpoints require a JSON object body.")
 
     if "userKey" not in body:
-        user_key = resolve_env_value()
-        if not user_key:
+        if not service_key:
             raise ValueError(
-                "Missing TUQU_USER_SERVICE_KEY. "
-                "Set that environment variable or provide userKey in the JSON body."
+                "Missing service key. Pass --service-key or provide userKey in the JSON body."
             )
-        body["userKey"] = user_key
+        body["userKey"] = service_key
 
     return body
 
@@ -226,7 +232,7 @@ def main() -> int:
         if auth_mode == "auto":
             auth_mode = detect_auth_mode(args.path)
 
-        body = prepare_body(auth_mode, body)
+        body = prepare_body(auth_mode, body, args.service_key)
         base_url = args.base_url or detect_base_url(args.path)
 
         headers = {
@@ -234,16 +240,15 @@ def main() -> int:
         }
 
         if auth_mode == "api-key":
-            api_key = resolve_env_value()
-            if not api_key:
-                raise ValueError("Missing TUQU_USER_SERVICE_KEY for this endpoint.")
-            headers["x-api-key"] = api_key
+            if not args.service_key:
+                raise ValueError("Missing service key. Pass --service-key for this endpoint.")
+            headers["x-api-key"] = args.service_key
 
         if auth_mode == "service-key":
-            service_key = resolve_service_key(body, query_items)
+            service_key = resolve_service_key(args.service_key, body, query_items)
             if not service_key:
                 raise ValueError(
-                    "Missing service key. Set TUQU_USER_SERVICE_KEY, pass --query "
+                    "Missing service key. Pass --service-key, pass --query "
                     "serviceKey=..., or provide serviceKey in the JSON body."
                 )
             headers["Authorization"] = f"Bearer {service_key}"

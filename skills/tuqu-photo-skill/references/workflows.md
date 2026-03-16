@@ -165,7 +165,7 @@ Example Stripe body:
 - Do not call `/api/v2/apply-preset` without first discovering a valid `presetId`.
 - Do not expect `/api/v2/generate-for-character` or `/api/v2/generate-image` to enhance prompts for you.
 - Do not send raw base64 without the `data:image/...;base64,` prefix to image fields that expect data URLs.
-- Do not confuse the credential value with the auth mode. `TUQU_USER_SERVICE_KEY` may back multiple endpoints, but the server still expects body `userKey`, header `x-api-key`, or bearer `serviceKey` depending on the route.
+- Do not confuse the credential value with the auth mode. Even when the caller reuses the same role-specific service key across endpoints, the server still expects body `userKey`, header `x-api-key`, or bearer `serviceKey` depending on the route.
 - Do not drop `transactionId` on successful generations; it is the easiest join key for later support work.
 - Do not call `/api/v1/recharge/*` on `https://photo.tuqu.ai`; those endpoints live under `https://billing.tuqu.ai/dream-weaver`.
 - Do not send `x-api-key` to recharge endpoints.
