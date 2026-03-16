@@ -19,6 +19,7 @@ import {
 } from "@/lib/types";
 import { readWorkspaceCharacterRecords, writeCharacterRecord } from "@/lib/workspace";
 import { normalizeLanguage } from "@/lib/i18n";
+import { normalizeTuquRegistrationUrl, TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
 
 const dataDir = path.join(process.cwd(), "data");
 const uploadDir = path.join(process.cwd(), "public", "uploads");
@@ -28,7 +29,7 @@ const openclawWorkspaceRoot = resolveOptionalPathEnv(
   process.env.OPENCLAW_WORKSPACE_ROOT,
   path.join(os.homedir(), ".openclaw")
 );
-const defaultTuquRegistrationUrl = "https://billing.tuqu.ai/dream-weaver/login";
+const defaultTuquRegistrationUrl = TUQU_BILLING_DASHBOARD_URL;
 
 type LegacyCharacterRecord = Partial<CharacterRecord> & {
   vibe?: string;
@@ -104,7 +105,7 @@ function normalizeTuquConfig(raw: unknown): TuquConfig | undefined {
 
   const candidate = raw as Partial<TuquConfig> & { tuquCharacterId?: string };
   return {
-    registrationUrl: candidate.registrationUrl?.trim() || defaultTuquRegistrationUrl,
+    registrationUrl: normalizeTuquRegistrationUrl(candidate.registrationUrl),
     serviceKey: candidate.serviceKey ?? "",
     characterId: candidate.characterId?.trim() || candidate.tuquCharacterId?.trim() || undefined,
     updatedAt: candidate.updatedAt ?? new Date().toISOString()

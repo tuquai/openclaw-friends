@@ -550,12 +550,14 @@ type DiscordReplyPayload = {
   userMd: string;
   memoryMd: string;
   agentsMd?: string;
+  sharedSkillRouteMd?: string;
   photoStyleInstruction?: string;
   tuquRegistrationUrl?: string;
   tuquServiceKeyPresent?: boolean;
   tuquCharacterId?: string;
   recentMemory?: string;
   rolesJson?: string;
+  associatesJson?: string;
   message: string;
   username: string;
 };
@@ -590,12 +592,14 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                 "Do not mention prompts, files, setup, or that you are an AI assistant.",
                 "Avoid markdown code fences unless the user explicitly asks for code.",
                 "If the user asks about \u81ea\u62cd\u3001\u62cd\u7167\u3001\u5199\u771f\u3001\u8bc1\u4ef6\u7167\u3001\u751f\u6210\u7167\u7247\u3001\u751f\u56fe\u3001\u6539\u56fe or similar image-generation requests, follow the TUQU workflow in the provided context.",
-                "If TUQU Service Key is missing, first send the user the full provided registration URL, tell them to register there, and then tell them they can either send the Service Key in chat or configure it in the UI's TuQu settings section.",
-                "If TUQU Service Key exists but TUQU Character ID is missing for identity-preserving photos, tell the user you need to create your own TUQU character first from your workspace profile image and your own role data.",
+                "If TUQU Service Key is missing, first send the user the full provided registration URL, tell them to open that dashboard and create a TUQU Service Key there, and then tell them they can either send the Service Key in chat or configure it in the UI's TuQu settings section.",
+                "If TUQU Service Key exists but TUQU Character ID is missing for identity-preserving photos, create your own TUQU character first from your workspace profile image and your own role data before treating the request as ready.",
+                "Before any image generation, check the remaining balance. If balance is low or empty, remind the user and help them recharge.",
                 "Do not ask the user for their own face photo unless they explicitly say they want to generate images using their personal face.",
                 "When responding to photo or selfie requests, do not present multiple options, menus, or brainstorming lists unless the user explicitly asks for choices.",
                 "Instead, infer the single most fitting photo direction from your own character background and speak decisively.",
-                "If the user asks about other OpenClaw roles, shared cast members, or who else exists in the system, consult rolesDirectory from the provided context before answering.",
+                "If the user asks about close friends, recurring cast members, or who usually appears around you, consult associatesDirectory first.",
+                "If the user asks about other OpenClaw roles or who else exists in the broader system, consult rolesDirectory from the provided context before answering.",
                 "If the user asks about 充值, 余额, 买点数, top up, recharge, or how to pay for image generation: tell them you can help and ask whether they want WeChat or credit card. Keep the tone casual and helpful."
               ].join(" ")
             }
@@ -613,6 +617,7 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                   userMd: payload.userMd,
                   memoryMd: payload.memoryMd,
                   agentsMd: payload.agentsMd ?? "",
+                  sharedSkillRouteMd: payload.sharedSkillRouteMd ?? "",
                   photoStyleInstruction: payload.photoStyleInstruction ?? "",
                   tuqu: {
                     registrationUrl: payload.tuquRegistrationUrl ?? "",
@@ -621,6 +626,7 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                   },
                   recentMemory: payload.recentMemory ?? "",
                   rolesDirectory: payload.rolesJson ?? "",
+                  associatesDirectory: payload.associatesJson ?? "",
                   incomingMessage: {
                     username: payload.username,
                     text: payload.message

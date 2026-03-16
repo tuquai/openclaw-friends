@@ -27,8 +27,33 @@ type TuquGenerateResponse = {
   error?: { message?: string; code?: string };
 };
 
+type TuquCreateCharacterPayload = {
+  serviceKey: string;
+  name: string;
+  photoDataUrl: string;
+  description?: {
+    age?: string;
+    gender?: string;
+    profession?: string;
+    other?: string;
+  };
+};
+
+type TuquCreateCharacterResponse = {
+  success?: boolean;
+  data?: { _id?: string; name?: string };
+  error?: { message?: string; code?: string };
+};
+
 type TuquEnhancePromptResponse = {
   enhancedPrompt?: string;
+};
+
+type TuquBalanceResponse = {
+  success?: boolean;
+  balance?: number;
+  data?: { balance?: number };
+  error?: { message?: string; code?: string };
 };
 
 export class TuquApiError extends Error {
@@ -70,6 +95,48 @@ async function enhancePrompt(prompt: string): Promise<string> {
   } catch {
     return prompt;
   }
+}
+
+export async function createTuquCharacter(payload: TuquCreateCharacterPayload): Promise<string> {
+  const response = await fetch(`${TUQU_API_BASE}/api/characters`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": payload.serviceKey
+    },
+    body: JSON.stringify({
+      name: payload.name,
+      photoBase64: payload.photoDataUrl,
+      description: payload.description
+    })
+  });
+
+  const json = (await response.json().catch(() => ({}))) as TuquCreateCharacterResponse;
+  if (!response.ok || !json.success || !json.data?._id) {
+    const code = json.error?.code ?? `HTTP_${response.status}`;
+    const message = json.error?.message ?? `TUQU character creation failed (${response.status})`;
+    throw new TuquApiError(code, message);
+  }
+
+  return json.data._id;
+}
+
+export async function getTuquBalance(userKey: string): Promise<number | null> {
+  const response = await fetch(`${TUQU_API_BASE}/api/billing/balance`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userKey })
+  });
+
+  const json = (await response.json().catch(() => ({}))) as TuquBalanceResponse;
+  if (!response.ok) {
+    const code = json.error?.code ?? `HTTP_${response.status}`;
+    const message = json.error?.message ?? `TUQU balance request failed (${response.status})`;
+    throw new TuquApiError(code, message);
+  }
+
+  const balance = typeof json.balance === "number" ? json.balance : json.data?.balance;
+  return typeof balance === "number" ? balance : null;
 }
 
 export async function generateCharacterImage(payload: GenerateCharacterPayload): Promise<string> {

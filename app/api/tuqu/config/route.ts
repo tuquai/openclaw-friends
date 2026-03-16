@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCharacter, updateCharacter } from "@/lib/data";
-import { syncWorkspaceTuquConfig } from "@/lib/workspace";
+import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
+import { syncOpenClawRolesFile, syncWorkspaceTuquConfig } from "@/lib/workspace";
+import { normalizeTuquRegistrationUrl, TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
 
 export const runtime = "nodejs";
 
-const defaultRegistrationUrl = "https://billing.tuqu.ai/dream-weaver/login";
+const defaultRegistrationUrl = TUQU_BILLING_DASHBOARD_URL;
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json()) as {
@@ -26,7 +27,9 @@ export async function POST(request: NextRequest) {
   try {
     const updated = await updateCharacter(character.id, {
       tuquConfig: {
-        registrationUrl: payload.registrationUrl?.trim() || character.tuquConfig?.registrationUrl || defaultRegistrationUrl,
+        registrationUrl: normalizeTuquRegistrationUrl(
+          payload.registrationUrl?.trim() || character.tuquConfig?.registrationUrl || defaultRegistrationUrl
+        ),
         serviceKey: payload.serviceKey ?? character.tuquConfig?.serviceKey ?? "",
         characterId: payload.tuquCharacterId?.trim() || character.tuquConfig?.characterId,
         updatedAt: new Date().toISOString()
@@ -34,6 +37,7 @@ export async function POST(request: NextRequest) {
     });
 
     await syncWorkspaceTuquConfig(updated);
+    await syncOpenClawRolesFile(await listCharacters());
     return NextResponse.json({ character: updated });
   } catch (error) {
     return NextResponse.json(

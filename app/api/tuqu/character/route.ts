@@ -2,7 +2,8 @@ import { promises as fs } from "fs";
 import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
-import { syncOpenClawRolesFile, syncWorkspaceAssociates, syncWorkspaceTuquConfig } from "@/lib/workspace";
+import { createTuquCharacter } from "@/lib/tuqu";
+import { syncOpenClawRolesFile, syncWorkspaceTuquConfig } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
@@ -45,53 +46,33 @@ export async function POST(request: NextRequest) {
 
   try {
     const photoData = await fileToDataUri(publicPathToAbsolute(character.photos[0]));
-    const response = await fetch("https://photo.tuqu.ai/api/characters", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": character.tuquConfig.serviceKey
-      },
-      body: JSON.stringify({
-        name: character.name,
-        photoBase64: photoData,
-        description: {
-          age: character.age || undefined,
-          gender: character.gender || undefined,
-          profession: character.occupation || undefined,
-          other: character.concept || undefined
-        }
-      })
+    const tuquCharacterId = await createTuquCharacter({
+      serviceKey: character.tuquConfig.serviceKey,
+      name: character.name,
+      photoDataUrl: photoData,
+      description: {
+        age: character.age || undefined,
+        gender: character.gender || undefined,
+        profession: character.occupation || undefined,
+        other: character.concept || undefined
+      }
     });
-
-    const json = (await response.json().catch(() => ({}))) as {
-      success?: boolean;
-      data?: { _id?: string; name?: string };
-      error?: { message?: string };
-    };
-
-    if (!response.ok || !json.success || !json.data?._id) {
-      return NextResponse.json(
-        { error: json.error?.message ?? "创建 TUQU character 失败" },
-        { status: 500 }
-      );
-    }
 
     const updated = await updateCharacter(character.id, {
       tuquConfig: {
         registrationUrl: character.tuquConfig.registrationUrl,
         serviceKey: character.tuquConfig.serviceKey,
-        characterId: json.data._id,
+        characterId: tuquCharacterId,
         updatedAt: new Date().toISOString()
       }
     });
 
     await syncWorkspaceTuquConfig(updated);
-    await syncWorkspaceAssociates(updated);
     await syncOpenClawRolesFile(await listCharacters());
 
     return NextResponse.json({
       character: updated,
-      tuquCharacterId: json.data._id
+      tuquCharacterId
     });
   } catch (error) {
     return NextResponse.json(

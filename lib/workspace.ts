@@ -4,6 +4,7 @@ import path from "path";
 import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 import { normalizeLanguage } from "@/lib/i18n";
+import { normalizeTuquRegistrationUrl, TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
 
 const TUQU_SKILL_NAME = "tuqu-photo-skill";
 
@@ -14,12 +15,13 @@ export type TuquSkillSyncResult = {
 
 type WorkspaceAssociate = {
   characterName: string;
+  workspacePath: string;
   tuquCharacterId: string;
 };
 
-type SharedRoleEntry = Omit<CharacterRecord, "discordLink" | "tuquConfig"> & {
-  tuquConfig?: Omit<TuquConfig, "serviceKey">;
-  associates: WorkspaceAssociate[];
+type SharedRoleEntry = {
+  name: string;
+  workspacePath: string;
 };
 
 function getWorkspaceRoot() {
@@ -32,10 +34,6 @@ function getBundledTuquSkillPath() {
 
 function getInstalledTuquSkillPath() {
   return path.join(getWorkspaceRoot(), "skills", TUQU_SKILL_NAME);
-}
-
-function getBundledWorkspaceToolPath(dirName: string) {
-  return path.join(process.cwd(), "workspace-tools", dirName);
 }
 
 function slugify(value: string) {
@@ -69,6 +67,7 @@ Before doing anything else:
 3. Read \`memory/YYYY-MM-DD.md\` (today + yesterday) for recent context
 4. **If in MAIN SESSION** (direct chat with your human): Also read \`MEMORY.md\`
 5. If \`../SKILL_ROUTE.md\` exists and the task touches images, recharge, or other shared tool routing, read it too
+6. If \`ASSOCIATES.json\` exists and the task is about close friends, recurring cast, or multi-character photos, read it too
 
 Don't ask permission. Just do it.
 
@@ -143,6 +142,15 @@ TUQU API calls need the service key from \`tuqu_service_key.txt\` in this worksp
 - Send the remote TUQU image URL directly as a media attachment. Do not download to local files.
 - After each TUQU API call, log key info (endpoint, imageUrl, balance, transactionId) in \`memory/YYYY-MM-DD.md\`.
 
+### TUQU Workflow
+
+- Treat 自拍、拍照、写真、发张图 and similar requests as executable image requests, not just casual chat.
+- If the requested image should show you, first ensure your own TUQU character exists. If you have a service key but no character ID yet, create your TUQU character from your profile image and role data before continuing.
+- Before any TUQU image generation, check the remaining balance. If balance is low or empty, remind the user and help them recharge.
+- If the image is your own selfie / portrait / a scene where you are visibly in frame, prefer \`/api/v2/generate-for-character\`.
+- If the image is scenery, objects, edits, templates, or anything where you are not visibly in frame, prefer \`/api/v2/generate-image\`.
+- If you create or learn a TUQU character for another OpenClaw role who matters to your current cast, add or update that role in \`ASSOCIATES.json\`.
+
 ### Image Generation
 
 When generating an image for a character (e.g., via TUQU API), you MUST first use the following logic to generate a "Prompt for Generating the Image":
@@ -174,8 +182,9 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 
 | Task type | Where to look |
 |-----------|---------------|
-| The current character's own selfie / portrait / visible-in-frame photo | \`character-selfie/SKILL.md\` |
-| Scenery, objects, image edits, templates, or styles | \`tuqu-catalog/SKILL.md\` |
+| The current character's own selfie / portrait / visible-in-frame photo | Ensure TUQU character exists, check balance, then use \`/api/v2/generate-for-character\` |
+| Scenery, objects, image edits, templates, or styles without the current character in frame | Check balance, then use \`/api/v2/generate-image\` |
+| Balance checks and recharge | \`/api/billing/balance\` then \`/api/v1/recharge/*\` |
 | Low-level TUQU API reference | \`~/.openclaw/skills/tuqu-photo-skill/SKILL.md\` |
 | Discord gateway issues | \`openclaw-gateway-recovery/SKILL.md\` |
 | Everything else | Use native tools directly |
@@ -183,6 +192,9 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 ## Selfie Rules
 
 - If the user asks for the current character's own 自拍、照片、写真、发张图, generate that character's photo.
+- If the current character should appear in frame, create the current character's TUQU character first when it is missing, then check balance before generation.
+- Treat 自拍 / 角色出镜 requests as identity-preserving jobs and route them to \`/api/v2/generate-for-character\`.
+- Treat scenery / object / edit-only jobs as freestyle jobs and route them to \`/api/v2/generate-image\`.
 - Do not ask for the user's face photo unless the user explicitly wants themselves to appear in the image.
 - Treat 自拍 as image-generation ability, not literal phone ownership.
 - For a normal 自拍, default to front-camera framing with the device out of frame unless the user explicitly wants a mirror shot or visible phone.
@@ -190,8 +202,9 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 ## Other Roles
 
 - Read \`../ROLES.json\` when you need to know other OpenClaw roles in the system.
-- Each role entry includes that role's shared profile snapshot plus its \`associates\`.
+- Each role entry only includes \`name\` and \`workspacePath\`. Use the workspace path to read the target role's files directly when you need more detail.
 - Read \`ASSOCIATES.json\` inside your own workspace when the question is about your current project's cast rather than the whole OpenClaw role directory.
+- \`ASSOCIATES.json\` entries should carry each associate's \`characterName\`, \`workspacePath\`, and \`tuquCharacterId\`.
 
 ## Media Rules
 
@@ -240,30 +253,6 @@ function buildWorkspaceState(character: CharacterRecord) {
     characterName: character.name,
     workspacePath: character.workspacePath ?? null
   };
-}
-
-function normalizeAssociates(raw: unknown): WorkspaceAssociate[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") {
-        return null;
-      }
-
-      const candidate = entry as Partial<WorkspaceAssociate>;
-      const characterName = candidate.characterName?.trim();
-      const tuquCharacterId = candidate.tuquCharacterId?.trim();
-
-      if (!characterName || !tuquCharacterId) {
-        return null;
-      }
-
-      return { characterName, tuquCharacterId };
-    })
-    .filter((entry): entry is WorkspaceAssociate => Boolean(entry));
 }
 
 function buildTuquConfigPayload(character: CharacterRecord, workspacePath: string) {
@@ -380,40 +369,40 @@ async function writeAssociatesFile(workspacePath: string, associates: WorkspaceA
   );
 }
 
-async function readAssociatesFile(workspacePath: string): Promise<WorkspaceAssociate[]> {
-  try {
-    const raw = JSON.parse(await fs.readFile(path.join(workspacePath, "ASSOCIATES.json"), "utf8")) as unknown;
-    return normalizeAssociates(raw);
-  } catch {
-    return [];
-  }
-}
-
-function sanitizeRoleEntry(character: CharacterRecord, associates: WorkspaceAssociate[]): SharedRoleEntry {
-  const { discordLink: _discordLink, tuquConfig, ...rest } = character;
-
+function sanitizeRoleEntry(character: CharacterRecord): SharedRoleEntry {
   return {
-    ...rest,
-    tuquConfig: tuquConfig
-      ? {
-          registrationUrl: tuquConfig.registrationUrl,
-          characterId: tuquConfig.characterId,
-          updatedAt: tuquConfig.updatedAt
-        }
-      : undefined,
-    associates
+    name: character.name,
+    workspacePath: character.workspacePath ?? ""
   };
 }
 
 export async function syncOpenClawRolesFile(characters: CharacterRecord[]) {
-  const roles = await Promise.all(
-    characters
-      .filter((character) => Boolean(character.workspacePath))
-      .map(async (character) => {
-        const associates = character.workspacePath ? await readAssociatesFile(character.workspacePath) : [];
-        return sanitizeRoleEntry(character, associates);
-      })
+  const workspaceCharacters = characters.filter(
+    (character): character is CharacterRecord & { workspacePath: string } => Boolean(character.workspacePath)
   );
+
+  await Promise.all(
+    workspaceCharacters.map((character) =>
+      writeAssociatesFile(
+        character.workspacePath,
+        workspaceCharacters
+          .filter(
+            (candidate) =>
+              candidate.id !== character.id &&
+              Boolean(candidate.workspacePath) &&
+              Boolean(candidate.tuquConfig?.characterId?.trim())
+          )
+          .map((candidate) => ({
+            characterName: candidate.name,
+            workspacePath: candidate.workspacePath,
+            tuquCharacterId: candidate.tuquConfig!.characterId!.trim()
+          }))
+          .sort((left, right) => left.characterName.localeCompare(right.characterName))
+      )
+    )
+  );
+
+  const roles = workspaceCharacters.map((character) => sanitizeRoleEntry(character));
 
   await fs.mkdir(getWorkspaceRoot(), { recursive: true });
   await fs.writeFile(
@@ -512,24 +501,6 @@ async function installCharacterPhotoProfile(character: CharacterRecord, workspac
     JSON.stringify(buildCharacterPhotoProfile(character), null, 2),
     "utf8"
   );
-}
-
-async function installBundledWorkspaceTool(workspacePath: string, dirName: string) {
-  const sourceRoot = getBundledWorkspaceToolPath(dirName);
-  const sourceSkill = path.join(sourceRoot, "SKILL.md");
-  const targetRoot = path.join(workspacePath, dirName);
-
-  if (!(await fileExists(sourceSkill))) {
-    throw new Error(`Bundled workspace tool is missing: ${sourceSkill}`);
-  }
-
-  await fs.mkdir(targetRoot, { recursive: true });
-  await fs.cp(sourceRoot, targetRoot, { recursive: true, force: true });
-}
-
-async function installWorkspaceImageTools(workspacePath: string) {
-  await installBundledWorkspaceTool(workspacePath, "character-selfie");
-  await installBundledWorkspaceTool(workspacePath, "tuqu-catalog");
 }
 
 function sharedSkillRouteMarkerPath(workspacePath: string) {
@@ -646,7 +617,6 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
 
   await writeWorkspaceFiles(character, workspacePath);
   await installCharacterPhotoProfile(character, workspacePath);
-  await installWorkspaceImageTools(workspacePath);
   await installGatewayRecoverySkill(workspacePath);
   await fs.writeFile(path.join(workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
   await installSharedSkillRouteFile();
@@ -706,15 +676,6 @@ export async function syncWorkspaceTuquConfig(character: CharacterRecord) {
   await writeTuquFiles(character, character.workspacePath);
 }
 
-export async function syncWorkspaceAssociates(character: CharacterRecord) {
-  if (!character.workspacePath) {
-    return;
-  }
-
-  const associates = await readAssociatesFile(character.workspacePath);
-  await writeAssociatesFile(character.workspacePath, associates);
-}
-
 export async function syncWorkspaceSkills(character: CharacterRecord) {
   if (!character.workspacePath) {
     return;
@@ -727,7 +688,6 @@ export async function syncWorkspaceSkills(character: CharacterRecord) {
 
   if (await fileExists(sharedSkillRouteMarkerPath(character.workspacePath))) {
     await installSharedSkillRouteFile();
-    await installWorkspaceImageTools(character.workspacePath);
     await fs.writeFile(path.join(character.workspacePath, "AGENTS.md"), staticAgentsMd(character.name), "utf8");
   }
 }
@@ -945,7 +905,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
       await fs.readFile(path.join(openclawDir, "tuqu-config.json"), "utf8")
     ) as Partial<TuquConfig> & { tuquCharacterId?: string };
     tuquConfig = {
-      registrationUrl: raw.registrationUrl ?? "https://billing.tuqu.ai/dream-weaver/login",
+      registrationUrl: normalizeTuquRegistrationUrl(raw.registrationUrl),
       serviceKey: raw.serviceKey ?? "",
       characterId: raw.characterId ?? raw.tuquCharacterId,
       updatedAt: raw.updatedAt ?? new Date().toISOString()
@@ -959,7 +919,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
       const key = (await fs.readFile(path.join(workspacePath, "tuqu_service_key.txt"), "utf8")).trim();
       if (key) {
         tuquConfig = {
-          registrationUrl: "https://billing.tuqu.ai/dream-weaver/login",
+          registrationUrl: TUQU_BILLING_DASHBOARD_URL,
           serviceKey: key,
           updatedAt: new Date().toISOString()
         };

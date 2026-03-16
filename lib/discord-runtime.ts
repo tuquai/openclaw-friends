@@ -2,13 +2,24 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { Client, Events, GatewayIntentBits, Message, Partials } from "discord.js";
-import { listCharacters } from "@/lib/data";
+import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
 import { listDiscordRuntimeAccounts, readDiscordRuntimeAccount } from "@/lib/discord-config";
 import { resolveOptionalPathEnv } from "@/lib/env-path";
 import { generateDiscordReply, generateInCharacterError, generatePhotoScene, generateRechargeDecision } from "@/lib/openai";
-import { generateCharacterImage, generateFreestyleImage, TuquApiError, listRechargePlans, createWechatPayment, createStripePayment } from "@/lib/tuqu";
+import {
+  createStripePayment,
+  createTuquCharacter,
+  createWechatPayment,
+  generateCharacterImage,
+  generateFreestyleImage,
+  getTuquBalance,
+  listRechargePlans,
+  TuquApiError
+} from "@/lib/tuqu";
 import { AppLanguage, CharacterRecord, DiscordRuntimeAccountStatus, DiscordRuntimeStatus } from "@/lib/types";
 import { instructionLanguageName } from "@/lib/i18n";
+import { syncOpenClawRolesFile, syncWorkspaceTuquConfig } from "@/lib/workspace";
+import { normalizeTuquRegistrationUrl, TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
 
 type ReconnectState = {
   consecutiveErrors: number;
@@ -180,17 +191,19 @@ async function readIfExists(filePath: string) {
 
 async function loadRoleContext(character: CharacterRecord) {
   if (character.workspacePath) {
-    const [identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson] = await Promise.all([
+    const [identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson, associatesJson, sharedSkillRouteMd] = await Promise.all([
       readIfExists(path.join(character.workspacePath, "IDENTITY.md")),
       readIfExists(path.join(character.workspacePath, "SOUL.md")),
       readIfExists(path.join(character.workspacePath, "USER.md")),
       readIfExists(path.join(character.workspacePath, "MEMORY.md")),
       readIfExists(path.join(character.workspacePath, "AGENTS.md")),
       readIfExists(todayMemoryPath(character.workspacePath)),
-      readIfExists(path.join(character.workspacePath, "..", "ROLES.json"))
+      readIfExists(path.join(character.workspacePath, "..", "ROLES.json")),
+      readIfExists(path.join(character.workspacePath, "ASSOCIATES.json")),
+      readIfExists(path.join(character.workspacePath, "..", "SKILL_ROUTE.md"))
     ]);
 
-    return { identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson };
+    return { identityMd, soulMd, userMd, memoryMd, agentsMd, recentMemory, rolesJson, associatesJson, sharedSkillRouteMd };
   }
 
   return {
@@ -200,7 +213,9 @@ async function loadRoleContext(character: CharacterRecord) {
     memoryMd: character.blueprintPackage?.files.memoryMd ?? "",
     agentsMd: "",
     recentMemory: "",
-    rolesJson: ""
+    rolesJson: "",
+    associatesJson: "",
+    sharedSkillRouteMd: ""
   };
 }
 
@@ -287,18 +302,18 @@ function wantsUserFace(message: string) {
 }
 
 function buildTuquGuidance(character: CharacterRecord) {
-  const registrationUrl = character.tuquConfig?.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login";
+  const registrationUrl = normalizeTuquRegistrationUrl(character.tuquConfig?.registrationUrl);
   const hasServiceKey = Boolean(character.tuquConfig?.serviceKey.trim());
   const hasCharacterId = Boolean(character.tuquConfig?.characterId?.trim());
 
   if (!hasServiceKey) {
     if (character.language === "en") {
-      return `If you want me to take photos or generate images, open this full link first and create a TUQU Service Key: ${registrationUrl}. Once you have it, either send the Service Key to me here or configure it in the UI's TuQu settings section, and I’ll create my own TUQU character from my profile image and role data before we keep going.`;
+      return `If you want me to take photos or generate images, open this full dashboard link first and create a TUQU Service Key: ${registrationUrl}. Once you have it, either send the Service Key to me here or configure it in the UI's TuQu settings section, and I’ll create my own TUQU character from my profile image and role data before we keep going.`;
     }
     if (character.language === "ja") {
-      return `私に写真生成をさせたいなら、まずこの完全なリンクを開いて TUQU Service Key を作ってね: ${registrationUrl}。作れたらここで Service Key を送ってくれるか、UI の TuQu 設定欄で設定してくれれば、先に私自身のプロフィール画像とキャラ情報から TUQU キャラを作って、そのあと続けて画像を出せるよ。`;
+      return `私に写真生成をさせたいなら、まずこの dashboard の完全なリンクを開いて TUQU Service Key を作ってね: ${registrationUrl}。作れたらここで Service Key を送ってくれるか、UI の TuQu 設定欄で設定してくれれば、先に私自身のプロフィール画像とキャラ情報から TUQU キャラを作って、そのあと続けて画像を出せるよ。`;
     }
-    return `要让我拥有拍照和生成图片的能力，你需要先打开这个完整链接注册并生成 TUQU Service Key：${registrationUrl}。注册好后，你可以直接把 Service Key 发给我，或者在 UI 的 TuQu 配置区域进行配置；我会先用我自己的 profile 图片和角色资料创建我的 TUQU 角色，再继续帮你出图。`;
+    return `要让我拥有拍照和生成图片的能力，你需要先打开这个 dashboard 完整链接创建 TUQU Service Key：${registrationUrl}。创建好后，你可以直接把 Service Key 发给我，或者在 UI 的 TuQu 配置区域进行配置；我会先用我自己的 profile 图片和角色资料创建我的 TUQU 角色，再继续帮你出图。`;
   }
 
   if (!hasCharacterId) {
@@ -312,6 +327,109 @@ function buildTuquGuidance(character: CharacterRecord) {
   }
 
   return null;
+}
+
+function absolutePublicPhotoPath(photoPath: string) {
+  return path.join(process.cwd(), "public", photoPath.replace(/^\//, ""));
+}
+
+async function fileToDataUri(filePath: string) {
+  const bytes = await fs.readFile(filePath);
+  const extension = path.extname(filePath).toLowerCase();
+  const mime =
+    extension === ".png"
+      ? "image/png"
+      : extension === ".webp"
+        ? "image/webp"
+        : extension === ".gif"
+          ? "image/gif"
+          : "image/jpeg";
+  return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
+async function resolveCharacterReferenceImagePath(character: CharacterRecord): Promise<string | null> {
+  if (character.workspacePath) {
+    for (const fileName of ["profile.jpg", "profile.jpeg", "profile.png", "profile.webp"]) {
+      const candidate = path.join(character.workspacePath, fileName);
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+
+  const profilePhoto = character.photos[0];
+  if (!profilePhoto) {
+    return null;
+  }
+
+  const candidate = absolutePublicPhotoPath(profilePhoto);
+  try {
+    await fs.access(candidate);
+    return candidate;
+  } catch {
+    return null;
+  }
+}
+
+function buildTuquCharacterDescription(character: CharacterRecord) {
+  return {
+    age: character.age || undefined,
+    gender: character.gender || undefined,
+    profession: character.occupation || undefined,
+    other: [character.concept, character.worldSetting, character.personality.otherNotes]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join("；") || undefined
+  };
+}
+
+function buildMissingPhotoReferenceGuidance(character: CharacterRecord) {
+  if (character.language === "en") {
+    return "I still don't have a usable profile photo in my workspace, so I can't finish setting up my TUQU character for selfies yet.";
+  }
+  if (character.language === "ja") {
+    return "まだ使えるプロフィール写真が workspace にないから、自撮り用の TUQU キャラ設定を最後まで進められないの。";
+  }
+  return "我这边还没有可用的 profile 图片，所以暂时没法把自己的 TUQU character 建好来继续自拍。";
+}
+
+async function ensureTuquCharacterConfigured(character: CharacterRecord): Promise<CharacterRecord> {
+  if (character.tuquConfig?.characterId?.trim()) {
+    return character;
+  }
+
+  const serviceKey = character.tuquConfig?.serviceKey?.trim();
+  if (!serviceKey) {
+    throw new Error("Missing TUQU Service Key");
+  }
+
+  const referenceImagePath = await resolveCharacterReferenceImagePath(character);
+  if (!referenceImagePath) {
+    throw new Error("Missing TUQU reference image");
+  }
+
+  const photoDataUrl = await fileToDataUri(referenceImagePath);
+  const tuquCharacterId = await createTuquCharacter({
+    serviceKey,
+    name: character.name,
+    photoDataUrl,
+    description: buildTuquCharacterDescription(character)
+  });
+
+  const updated = await updateCharacter(character.id, {
+    tuquConfig: {
+      registrationUrl: normalizeTuquRegistrationUrl(character.tuquConfig?.registrationUrl || TUQU_BILLING_DASHBOARD_URL),
+      serviceKey,
+      characterId: tuquCharacterId,
+      updatedAt: new Date().toISOString()
+    }
+  });
+
+  await syncWorkspaceTuquConfig(updated);
+  await syncOpenClawRolesFile(await listCharacters());
+  return (await getCharacter(updated.id)) ?? updated;
 }
 
 function buildPhotoStyleInstruction(character: CharacterRecord) {
@@ -375,6 +493,8 @@ type RoleContext = {
   agentsMd?: string;
   recentMemory?: string;
   rolesJson?: string;
+  associatesJson?: string;
+  sharedSkillRouteMd?: string;
 };
 
 function describeTuquError(error: unknown, character?: CharacterRecord): string {
@@ -447,8 +567,38 @@ async function handlePhotoRequest(
     await message.channel.sendTyping();
   }
 
-  const serviceKey = character.tuquConfig!.serviceKey;
-  const characterId = character.tuquConfig!.characterId!;
+  let effectiveCharacter = character;
+  if (!scene.isFreestyle) {
+    try {
+      effectiveCharacter = await ensureTuquCharacterConfigured(character);
+    } catch (setupError) {
+      console.error("TUQU character setup failed:", setupError);
+      if (setupError instanceof Error && setupError.message === "Missing TUQU reference image") {
+        await message.reply(buildMissingPhotoReferenceGuidance(character));
+      } else {
+        await replyWithInCharacterError(message, character, context, setupError);
+      }
+      return;
+    }
+  }
+
+  const serviceKey = effectiveCharacter.tuquConfig!.serviceKey;
+  try {
+    const balance = await getTuquBalance(serviceKey);
+    if (typeof balance === "number" && balance <= 0) {
+      await replyWithInCharacterError(
+        message,
+        effectiveCharacter,
+        context,
+        new TuquApiError("INSUFFICIENT_BALANCE", "The image generation service is out of balance.", balance)
+      );
+      return;
+    }
+  } catch (balanceError) {
+    console.error("TUQU balance check failed:", balanceError);
+  }
+
+  const characterId = effectiveCharacter.tuquConfig!.characterId!;
 
   let imageUrl: string;
   try {
@@ -476,7 +626,7 @@ async function handlePhotoRequest(
   if ("send" in message.channel) {
     await message.channel.send({ files: [imageUrl] });
   }
-  await appendConversationMemory(character, message.author.username, userText, `${scene.chatReply} [\u56fe\u7247]`);
+  await appendConversationMemory(effectiveCharacter, message.author.username, userText, `${scene.chatReply} [\u56fe\u7247]`);
 }
 
 function isRechargeRequest(message: string) {
@@ -608,9 +758,9 @@ async function handleMessage(message: Message) {
   }
 
   const isPhoto = !message.author.bot && isPhotoRequest(trimmed) && !wantsUserFace(trimmed);
-  const tuquReady = Boolean(character.tuquConfig?.serviceKey?.trim() && character.tuquConfig?.characterId?.trim());
+  const hasServiceKey = Boolean(character.tuquConfig?.serviceKey?.trim());
 
-  if (isPhoto && !tuquReady) {
+  if (isPhoto && !hasServiceKey) {
     const guidance = buildTuquGuidance(character);
     if (guidance) {
       await message.reply(guidance);
@@ -624,12 +774,11 @@ async function handleMessage(message: Message) {
     }
     const context = await loadRoleContext(character);
 
-    if (isPhoto && tuquReady) {
+    if (isPhoto) {
       await handlePhotoRequest(message, character, context, trimmed);
       return;
     }
 
-    const hasServiceKey = Boolean(character.tuquConfig?.serviceKey?.trim());
     if (!message.author.bot && hasServiceKey && isRechargeRequest(trimmed)) {
       await handleRechargeRequest(message, character, context, trimmed);
       return;
