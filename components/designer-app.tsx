@@ -19,6 +19,7 @@ import {
 } from "@/lib/types";
 import type { WorkspaceSummary } from "@/lib/workspace";
 import type { TuquConfig } from "@/lib/types";
+import { TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
 import {
   inferMbtiFromAxes,
   PERSONALITY_AXIS_OPTIONS,
@@ -118,6 +119,8 @@ const TUTORIAL_VIDEO_LINKS = {
   bilibili: "https://www.bilibili.com/video/BV1wkNMzsE5v/?spm_id_from=333.1007.top_right_bar_window_history.content.click"
 } as const;
 
+const DISCORD_DEVELOPER_PORTAL_URL = "https://discord.com/developers/applications" as const;
+
 const HERO_GALLERY = ["/model1.png", "/model2.png", "/model3.png"] as const;
 
 function safeList(value: string[] | undefined) {
@@ -144,7 +147,7 @@ function emptyBlueprintFiles() {
 
 function defaultTuquConfig(): TuquConfig {
   return {
-    registrationUrl: "https://billing.tuqu.ai/dream-weaver/login",
+    registrationUrl: TUQU_BILLING_DASHBOARD_URL,
     serviceKey: "",
     updatedAt: "",
     characterId: undefined
@@ -1791,6 +1794,24 @@ export function DesignerApp({
             </div>
           </div>
 
+          <div className="discord-portal-callout">
+            <div className="discord-portal-copy">
+              <span className="discord-portal-eyebrow">{t(uiLanguage, "discord.portalLabel")}</span>
+              <strong>{t(uiLanguage, "discord.portalTitle")}</strong>
+              <p>{t(uiLanguage, "discord.portalDescription")}</p>
+              <span className="discord-portal-url">{DISCORD_DEVELOPER_PORTAL_URL}</span>
+            </div>
+            <a
+              aria-label={`${t(uiLanguage, "discord.portalCta")} (${DISCORD_DEVELOPER_PORTAL_URL})`}
+              className="button-primary discord-portal-link"
+              href={DISCORD_DEVELOPER_PORTAL_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              {t(uiLanguage, "discord.portalCta")}
+            </a>
+          </div>
+
           <div className="form-grid">
             <div className="field">
               <label htmlFor="discord-guild-id">Server ID</label>
@@ -1886,11 +1907,11 @@ export function DesignerApp({
               <label>{t(uiLanguage, "tuqu.registration")}</label>
               <a
                 className="tuqu-registration-link"
-                href={tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+                href={tuquConfigDraft.registrationUrl || TUQU_BILLING_DASHBOARD_URL}
                 rel="noopener noreferrer"
                 target="_blank"
               >
-                {tuquConfigDraft.registrationUrl || "https://billing.tuqu.ai/dream-weaver/login"}
+                {tuquConfigDraft.registrationUrl || TUQU_BILLING_DASHBOARD_URL}
               </a>
             </div>
 
