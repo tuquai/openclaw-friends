@@ -16,7 +16,7 @@
 
 - `mkdir`
 - 写入 `IDENTITY.md` / `SOUL.md` / `USER.md` / `MEMORY.md`
-- 创建 `avatars/`、`memory/`、`.openclaw/`
+- 创建 `memory/`、`.openclaw/`
 - 拷贝首张角色照片作为头像
 - 生成固定的 `AGENTS.md`、`TOOLS.md`、`HEARTBEAT.md`、`workspace-state.json`
 

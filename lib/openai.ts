@@ -599,6 +599,8 @@ export async function generateDiscordReply(payload: DiscordReplyPayload) {
                 "When responding to photo or selfie requests, do not present multiple options, menus, or brainstorming lists unless the user explicitly asks for choices.",
                 "Instead, infer the single most fitting photo direction from your own character background and speak decisively.",
                 "If the user asks about close friends, recurring cast members, or who usually appears around you, consult associatesDirectory first.",
+                "If the user asks for a photo with another named person or character, consult associatesDirectory first for their TUQU character info.",
+                "If that named person is missing from associatesDirectory, ask the user for a clear photo of them so you can create their TUQU character before taking the group photo.",
                 "If the user asks about other OpenClaw roles or who else exists in the broader system, consult rolesDirectory from the provided context before answering.",
                 "If the user asks about 充值, 余额, 买点数, top up, recharge, or how to pay for image generation: tell them you can help and ask whether they want WeChat or credit card. Keep the tone casual and helpful."
               ].join(" ")
@@ -661,9 +663,14 @@ const photoSceneSchema = {
       chatReply: { type: "string", description: "In-character chat reply to the user (no markdown)" },
       sceneDescription: { type: "string", description: "Detailed Chinese scene description for the image generation model" },
       isFreestyle: { type: "boolean", description: "true if no character face needed (scenery, objects, style transfer); false if the character should appear" },
-      ratio: { type: "string", description: "Image aspect ratio like 3:4, 1:1, 16:9, 9:16" }
+      ratio: { type: "string", description: "Image aspect ratio like 3:4, 1:1, 16:9, 9:16" },
+      additionalCharacterNames: {
+        type: "array",
+        description: "Named people or characters besides the current character who should also appear in frame and need identity preservation",
+        items: { type: "string" }
+      }
     },
-    required: ["chatReply", "sceneDescription", "isFreestyle", "ratio"]
+    required: ["chatReply", "sceneDescription", "isFreestyle", "ratio", "additionalCharacterNames"]
   }
 };
 
@@ -675,6 +682,7 @@ type PhotoScenePayload = {
   userMd: string;
   memoryMd: string;
   recentMemory?: string;
+  associatesJson?: string;
   message: string;
   username: string;
   hasAttachmentUrl?: boolean;
@@ -685,6 +693,7 @@ export type PhotoSceneResult = {
   sceneDescription: string;
   isFreestyle: boolean;
   ratio: string;
+  additionalCharacterNames: string[];
 };
 
 export async function generatePhotoScene(payload: PhotoScenePayload): Promise<PhotoSceneResult> {
@@ -717,6 +726,10 @@ export async function generatePhotoScene(payload: PhotoScenePayload): Promise<Ph
                 "If no person is needed (scenery, objects, style transfer, beautify/edit existing photo), set isFreestyle=true.",
                 "For selfies: use phrases like '前置镜头自拍视角，设备不入镜'. Never mention holding a phone unless user explicitly wants it visible.",
                 "For image editing/美颜/改图 requests with an attached image: set isFreestyle=true and describe the edit as a prompt that references the attached image.",
+                "If the user wants you to appear with another named person or character in the same image, include that exact name in additionalCharacterNames.",
+                "additionalCharacterNames should only include people who must visually appear in frame besides yourself.",
+                "Exclude the user unless they explicitly ask to appear in the image.",
+                "Exclude generic unnamed labels like 朋友, 同学, 路人, someone, or a crowd.",
                 "Choose an appropriate ratio: 3:4 for portraits, 1:1 for square, 16:9 for landscape, 9:16 for stories.",
                 "chatReply should be short and natural, like telling the user what photo you're taking. Do not use markdown.",
                 `Write both chatReply and sceneDescription in ${targetLanguage}.`
@@ -735,6 +748,7 @@ export async function generatePhotoScene(payload: PhotoScenePayload): Promise<Ph
                 userMd: payload.userMd,
                 memoryMd: payload.memoryMd,
                 recentMemory: payload.recentMemory ?? "",
+                associatesDirectory: payload.associatesJson ?? "",
                 hasAttachedImage: Boolean(payload.hasAttachmentUrl),
                 incomingMessage: { username: payload.username, text: payload.message }
               }, null, 2)

@@ -2,6 +2,12 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { Client, Events, GatewayIntentBits, Message, Partials } from "discord.js";
+import {
+  findAssociateByName,
+  parseAssociatesJson,
+  upsertWorkspaceAssociate,
+  type WorkspaceAssociate
+} from "@/lib/associates";
 import { getCharacter, listCharacters, updateCharacter } from "@/lib/data";
 import { listDiscordRuntimeAccounts, readDiscordRuntimeAccount } from "@/lib/discord-config";
 import { resolveOptionalPathEnv } from "@/lib/env-path";
@@ -395,6 +401,169 @@ function buildMissingPhotoReferenceGuidance(character: CharacterRecord) {
   return "我这边还没有可用的 profile 图片，所以暂时没法把自己的 TUQU character 建好来继续自拍。";
 }
 
+function normalizeAssociateName(name: string) {
+  return name.trim().toLocaleLowerCase();
+}
+
+function dedupeAssociateNames(names: string[], currentCharacterName: string) {
+  const seen = new Set<string>();
+  const currentName = normalizeAssociateName(currentCharacterName);
+  const next: string[] = [];
+
+  for (const rawName of names) {
+    const name = rawName.trim();
+    if (!name) {
+      continue;
+    }
+
+    const normalized = normalizeAssociateName(name);
+    if (!normalized || normalized === currentName || seen.has(normalized)) {
+      continue;
+    }
+
+    seen.add(normalized);
+    next.push(name);
+  }
+
+  return next;
+}
+
+function mimeTypeFromUrl(url: string) {
+  let pathname = "";
+  try {
+    pathname = new URL(url).pathname.toLowerCase();
+  } catch {
+    return "image/jpeg";
+  }
+  if (pathname.endsWith(".png")) {
+    return "image/png";
+  }
+  if (pathname.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (pathname.endsWith(".gif")) {
+    return "image/gif";
+  }
+  return "image/jpeg";
+}
+
+async function urlToDataUri(url: string) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch reference image (${response.status})`);
+  }
+
+  const mime = response.headers.get("content-type")?.split(";")[0] || mimeTypeFromUrl(url);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return `data:${mime};base64,${bytes.toString("base64")}`;
+}
+
+function buildAssociateCharacterDescription(owner: CharacterRecord, targetName: string, matchingRole?: CharacterRecord) {
+  if (matchingRole) {
+    return buildTuquCharacterDescription(matchingRole);
+  }
+
+  return {
+    other: [`${targetName}的参考照`, `作为${owner.name}的固定合影对象创建`, "保持用户提供的外貌特征，真实自然"]
+      .filter(Boolean)
+      .join("；")
+  };
+}
+
+function buildMissingAssociatePhotoGuidance(character: CharacterRecord, missingNames: string[]) {
+  const names = missingNames.join("、");
+
+  if (character.language === "en") {
+    if (missingNames.length === 1) {
+      return `If you want me in the photo with ${names}, send me a clear solo photo of them first. I'll register their TUQU character and then bring them into frame.`;
+    }
+    return `I don't have TUQU characters for ${names} yet. Send me a clear solo photo for each of them first, then I'll set them up and take the group shot.`;
+  }
+
+  if (character.language === "ja") {
+    if (missingNames.length === 1) {
+      return `${names}と一緒に写るなら、先にその人の顔がはっきり分かる写真を送って。TUQU character を作っておけば、次から一緒に写せるよ。`;
+    }
+    return `${names}の TUQU character がまだないの。先にそれぞれの顔がはっきり分かる写真を送ってくれたら、登録してから一緒に撮るよ。`;
+  }
+
+  if (missingNames.length === 1) {
+    return `要跟${names}一起拍的话，你先给我一张${names}清晰的单人照片。我把 TA 的 TUQU character 建好，再带 TA 一起入镜。`;
+  }
+  return `我这边还没有${names}的 TUQU character。先分别给我他们清晰的单人照片，我建好以后就能一起拍了。`;
+}
+
+async function createAssociateFromAttachment(
+  owner: CharacterRecord,
+  associateName: string,
+  attachmentUrl: string
+): Promise<WorkspaceAssociate> {
+  if (!owner.workspacePath) {
+    throw new Error("Character workspace is missing");
+  }
+
+  const serviceKey = owner.tuquConfig?.serviceKey?.trim();
+  if (!serviceKey) {
+    throw new Error("Missing TUQU Service Key");
+  }
+
+  const allCharacters = await listCharacters();
+  const matchingRole = allCharacters.find(
+    (candidate) => candidate.id !== owner.id && normalizeAssociateName(candidate.name) === normalizeAssociateName(associateName)
+  );
+  const photoDataUrl = await urlToDataUri(attachmentUrl);
+  const tuquCharacterId = await createTuquCharacter({
+    serviceKey,
+    name: matchingRole?.name ?? associateName,
+    photoDataUrl,
+    description: buildAssociateCharacterDescription(owner, associateName, matchingRole)
+  });
+
+  return upsertWorkspaceAssociate(owner.workspacePath, {
+    characterName: matchingRole?.name ?? associateName,
+    tuquCharacterId,
+    workspacePath: matchingRole?.workspacePath,
+    source: matchingRole ? "openclaw_role" : "user_photo"
+  });
+}
+
+async function resolveAssociateCharacterIds(
+  owner: CharacterRecord,
+  requestedAssociateNames: string[],
+  associatesJson: string | undefined,
+  attachmentUrl: string | undefined
+) {
+  const requestedNames = dedupeAssociateNames(requestedAssociateNames, owner.name);
+  if (!requestedNames.length) {
+    return { characterIds: [] as string[], missingNames: [] as string[] };
+  }
+
+  const associates = parseAssociatesJson(associatesJson ?? "");
+  const characterIds: string[] = [];
+  const missingNames: string[] = [];
+
+  for (const associateName of requestedNames) {
+    const match = findAssociateByName(associates, associateName);
+    if (match?.tuquCharacterId) {
+      characterIds.push(match.tuquCharacterId);
+      continue;
+    }
+    missingNames.push(associateName);
+  }
+
+  if (!missingNames.length) {
+    return { characterIds, missingNames };
+  }
+
+  if (missingNames.length === 1 && attachmentUrl) {
+    const created = await createAssociateFromAttachment(owner, missingNames[0], attachmentUrl);
+    characterIds.push(created.tuquCharacterId);
+    return { characterIds, missingNames: [] as string[] };
+  }
+
+  return { characterIds, missingNames };
+}
+
 async function ensureTuquCharacterConfigured(character: CharacterRecord): Promise<CharacterRecord> {
   if (character.tuquConfig?.characterId?.trim()) {
     return character;
@@ -561,12 +730,6 @@ async function handlePhotoRequest(
     hasAttachmentUrl: Boolean(attachmentUrl)
   });
 
-  await message.reply(scene.chatReply);
-
-  if ("sendTyping" in message.channel) {
-    await message.channel.sendTyping();
-  }
-
   let effectiveCharacter = character;
   if (!scene.isFreestyle) {
     try {
@@ -578,6 +741,27 @@ async function handlePhotoRequest(
       } else {
         await replyWithInCharacterError(message, character, context, setupError);
       }
+      return;
+    }
+  }
+
+  let associateCharacterIds: string[] = [];
+  if (!scene.isFreestyle) {
+    try {
+      const resolvedAssociates = await resolveAssociateCharacterIds(
+        effectiveCharacter,
+        scene.additionalCharacterNames,
+        context.associatesJson,
+        attachmentUrl
+      );
+      if (resolvedAssociates.missingNames.length) {
+        await message.reply(buildMissingAssociatePhotoGuidance(effectiveCharacter, resolvedAssociates.missingNames));
+        return;
+      }
+      associateCharacterIds = resolvedAssociates.characterIds;
+    } catch (associateError) {
+      console.error("Associate TUQU character setup failed:", associateError);
+      await replyWithInCharacterError(message, effectiveCharacter, context, associateError);
       return;
     }
   }
@@ -600,6 +784,12 @@ async function handlePhotoRequest(
 
   const characterId = effectiveCharacter.tuquConfig!.characterId!;
 
+  await message.reply(scene.chatReply);
+
+  if ("sendTyping" in message.channel) {
+    await message.channel.sendTyping();
+  }
+
   let imageUrl: string;
   try {
     if (scene.isFreestyle) {
@@ -612,7 +802,7 @@ async function handlePhotoRequest(
     } else {
       imageUrl = await generateCharacterImage({
         userKey: serviceKey,
-        characterIds: [characterId],
+        characterIds: [characterId, ...associateCharacterIds],
         sceneDescription: scene.sceneDescription,
         ratio: scene.ratio
       });

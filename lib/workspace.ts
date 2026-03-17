@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { resolveOptionalPathEnv } from "@/lib/env-path";
+import { readAssociatesFile, type WorkspaceAssociate, writeAssociatesFile } from "@/lib/associates";
 import { CharacterRecord, DiscordLink, TuquConfig } from "@/lib/types";
 import { normalizeLanguage } from "@/lib/i18n";
 import { normalizeTuquRegistrationUrl, TUQU_BILLING_DASHBOARD_URL } from "@/lib/tuqu-config";
@@ -11,12 +12,6 @@ const TUQU_SKILL_NAME = "tuqu-photo-skill";
 export type TuquSkillSyncResult = {
   status: "present" | "installed";
   skillPath: string;
-};
-
-type WorkspaceAssociate = {
-  characterName: string;
-  workspacePath: string;
-  tuquCharacterId: string;
 };
 
 type SharedRoleEntry = {
@@ -149,7 +144,8 @@ TUQU API calls need the service key from \`tuqu_service_key.txt\` in this worksp
 - Before any TUQU image generation, check the remaining balance. If balance is low or empty, remind the user and help them recharge.
 - If the image is your own selfie / portrait / a scene where you are visibly in frame, prefer \`/api/v2/generate-for-character\`.
 - If the image is scenery, objects, edits, templates, or anything where you are not visibly in frame, prefer \`/api/v2/generate-image\`.
-- If you create or learn a TUQU character for another OpenClaw role who matters to your current cast, add or update that role in \`ASSOCIATES.json\`.
+- If you create or learn a TUQU character for someone who should appear with you in future photos, add or update them in \`ASSOCIATES.json\`.
+- If the user wants a new person in frame and you cannot find them in \`ASSOCIATES.json\`, ask for a clear reference photo first so you can create their TUQU character.
 
 ### Image Generation
 
@@ -203,8 +199,9 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 
 - Read \`../ROLES.json\` when you need to know other OpenClaw roles in the system.
 - Each role entry only includes \`name\` and \`workspacePath\`. Use the workspace path to read the target role's files directly when you need more detail.
-- Read \`ASSOCIATES.json\` inside your own workspace when the question is about your current project's cast rather than the whole OpenClaw role directory.
-- \`ASSOCIATES.json\` entries should carry each associate's \`characterName\`, \`workspacePath\`, and \`tuquCharacterId\`.
+- Read \`ASSOCIATES.json\` inside your own workspace when the question is about your current cast or repeat photo partners rather than the whole OpenClaw role directory.
+- \`ASSOCIATES.json\` is a per-workspace TUQU companion cache, not a mirror of \`ROLES.json\`.
+- \`ASSOCIATES.json\` entries should carry each associate's \`characterName\`, \`tuquCharacterId\`, and optionally \`workspacePath\`, \`source\`, and timestamps.
 
 ## Media Rules
 
@@ -361,19 +358,52 @@ async function writeWorkspaceFiles(character: CharacterRecord, workspacePath: st
   await fs.writeFile(path.join(workspacePath, "MEMORY.md"), character.blueprintPackage?.files.memoryMd ?? "", "utf8");
 }
 
-async function writeAssociatesFile(workspacePath: string, associates: WorkspaceAssociate[] = []) {
-  await fs.writeFile(
-    path.join(workspacePath, "ASSOCIATES.json"),
-    JSON.stringify(associates, null, 2),
-    "utf8"
-  );
-}
-
 function sanitizeRoleEntry(character: CharacterRecord): SharedRoleEntry {
   return {
     name: character.name,
     workspacePath: character.workspacePath ?? ""
   };
+}
+
+function buildLegacyAssociateMirror(
+  currentCharacter: CharacterRecord & { workspacePath: string },
+  workspaceCharacters: Array<CharacterRecord & { workspacePath: string }>
+): WorkspaceAssociate[] {
+  return workspaceCharacters
+    .filter(
+      (candidate) =>
+        candidate.id !== currentCharacter.id &&
+        Boolean(candidate.workspacePath) &&
+        Boolean(candidate.tuquConfig?.characterId?.trim())
+    )
+    .map((candidate) => ({
+      characterName: candidate.name,
+      workspacePath: candidate.workspacePath,
+      tuquCharacterId: candidate.tuquConfig!.characterId!.trim()
+    }))
+    .sort((left, right) => left.characterName.localeCompare(right.characterName));
+}
+
+function associateSignature(associate: WorkspaceAssociate) {
+  return [
+    associate.characterName.trim().toLocaleLowerCase(),
+    associate.tuquCharacterId.trim(),
+    associate.workspacePath?.trim() ?? ""
+  ].join("::");
+}
+
+function matchesLegacyAssociateMirror(actual: WorkspaceAssociate[], legacyMirror: WorkspaceAssociate[]) {
+  if (!actual.length || actual.length !== legacyMirror.length) {
+    return false;
+  }
+
+  if (actual.some((associate) => associate.source || associate.createdAt || associate.updatedAt)) {
+    return false;
+  }
+
+  const left = [...actual].map(associateSignature).sort();
+  const right = [...legacyMirror].map(associateSignature).sort();
+  return left.every((entry, index) => entry === right[index]);
 }
 
 export async function syncOpenClawRolesFile(characters: CharacterRecord[]) {
@@ -382,24 +412,13 @@ export async function syncOpenClawRolesFile(characters: CharacterRecord[]) {
   );
 
   await Promise.all(
-    workspaceCharacters.map((character) =>
-      writeAssociatesFile(
-        character.workspacePath,
-        workspaceCharacters
-          .filter(
-            (candidate) =>
-              candidate.id !== character.id &&
-              Boolean(candidate.workspacePath) &&
-              Boolean(candidate.tuquConfig?.characterId?.trim())
-          )
-          .map((candidate) => ({
-            characterName: candidate.name,
-            workspacePath: candidate.workspacePath,
-            tuquCharacterId: candidate.tuquConfig!.characterId!.trim()
-          }))
-          .sort((left, right) => left.characterName.localeCompare(right.characterName))
-      )
-    )
+    workspaceCharacters.map(async (character) => {
+      const currentAssociates = await readAssociatesFile(character.workspacePath);
+      const legacyMirror = buildLegacyAssociateMirror(character, workspaceCharacters);
+      if (matchesLegacyAssociateMirror(currentAssociates, legacyMirror)) {
+        await writeAssociatesFile(character.workspacePath, []);
+      }
+    })
   );
 
   const roles = workspaceCharacters.map((character) => sanitizeRoleEntry(character));
@@ -605,15 +624,11 @@ export async function createWorkspaceFromCharacter(character: CharacterRecord) {
   const workspaceRoot = getWorkspaceRoot();
   const dirName = `workspace-${slugify(character.name)}-${character.id.slice(0, 8)}`;
   const workspacePath = character.workspacePath || path.join(workspaceRoot, dirName);
-  const avatarsDir = path.join(workspacePath, "avatars");
   const memoryDir = path.join(workspacePath, "memory");
   const openclawDir = path.join(workspacePath, ".openclaw");
-  const generatedDir = path.join(workspacePath, "generated");
 
-  await fs.mkdir(avatarsDir, { recursive: true });
   await fs.mkdir(memoryDir, { recursive: true });
   await fs.mkdir(openclawDir, { recursive: true });
-  await fs.mkdir(generatedDir, { recursive: true });
 
   await writeWorkspaceFiles(character, workspacePath);
   await installCharacterPhotoProfile(character, workspacePath);
