@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -979,7 +980,7 @@ export async function importWorkspaceAsCharacter(workspacePath: string): Promise
   const personalityInferenceEnabled =
     (base as { personalityInferenceEnabled?: boolean }).personalityInferenceEnabled !== false;
   const record: CharacterRecord = {
-    id: base.id ?? crypto.randomUUID(),
+    id: base.id ?? randomUUID(),
     name: base.name ?? "未命名角色",
     age: base.age ?? "",
     gender: base.gender ?? "",

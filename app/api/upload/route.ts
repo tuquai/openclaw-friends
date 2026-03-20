@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
 
   const uploadDir = await getUploadDir();
   const extension = path.extname(file.name) || ".jpg";
-  const filename = `${crypto.randomUUID()}${extension}`;
+  const filename = `${randomUUID()}${extension}`;
   const destination = path.join(uploadDir, filename);
   const bytes = Buffer.from(await file.arrayBuffer());
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
@@ -260,7 +261,7 @@ function normalizeCharacterRecord(raw: LegacyCharacterRecord): CharacterRecord {
     (value): value is string => typeof value === "string" && Boolean(value.trim())
   );
 
-  const id = raw.id ?? crypto.randomUUID();
+  const id = raw.id ?? randomUUID();
   const name = raw.name ?? "未命名角色";
   const discordLink = normalizeDiscordLink(raw.discordLink, raw.workspacePath);
   const tuquConfig = normalizeTuquConfig(raw.tuquConfig);
@@ -557,7 +558,7 @@ export async function getCharacter(id: string) {
 export async function createCharacter(input: DraftCharacterInput, questionnaire?: RelationshipQuestionnaireInput) {
   const now = new Date().toISOString();
   const record: CharacterRecord = {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     ...buildCharacterPatch(input),
     questionnaire: normalizeRelationshipQuestionnaire(questionnaire),
     createdAt: now,
