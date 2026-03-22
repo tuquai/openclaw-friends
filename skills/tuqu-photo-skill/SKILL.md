@@ -1,132 +1,247 @@
 ---
-name: tuqu-photo-skill
-description: Use when interacting with the Tuqu Dream Weaver photo or billing APIs for image generation, preset application, prompt enhancement, catalog or model discovery, character management, history queries, token balance checks, pricing/model lookup, or recharge flows, especially around /api/v2/generate-image, /api/v2/apply-preset, /api/v2/generate-for-character, /api/enhance-prompt, /api/catalog, /api/model-costs, /api/pricing-config, /api/characters, /api/history, /api/billing/balance, /api/v1/recharge/plans, /api/v1/recharge/wechat, or /api/v1/recharge/stripe.
+name: tuqu-photo-api
+description: Use when interacting with the Tuqu Dream Weaver photo or billing APIs for image generation, preset application, prompt enhancement, catalog or model discovery, character management, history queries, token balance checks, pricing/model lookup, or recharge flows, including requests such as 自拍, 照片, 写真, 发张图, 角色出镜, 风景, 物品, or pure edit-only images. Execute supported tasks through scripts/tuqu_request.py instead of ad-hoc HTTP calls.
 ---
 
 # Tuqu Photo API
 
 ## Overview
 
-Use this skill to call the Dream Weaver APIs safely and consistently across both hosts: `https://photo.tuqu.ai` for image and catalog flows, and `https://billing.tuqu.ai/dream-weaver` for recharge flows. The main failure mode is choosing the wrong host or authentication mode: body `userKey` for `/api/billing/balance` and all v2 generation endpoints, header `x-api-key` for character management and history APIs, `Authorization: Bearer <serviceKey>` for recharge endpoints, and no auth for discovery and prompt enhancement. `serviceKey` and `userKey` refer to the same credential.
+Use this skill through `scripts/tuqu_request.py`. For supported paths, the helper picks the correct
+host, applies the correct auth mode, keeps credentials explicit via `--service-key`, and prints
+formatted JSON for direct inspection.
 
-## Set Base URLs Only
+Keep API semantics in [TUQU_API.md](./TUQU_API.md). Keep exact request and response fields in
+[references/endpoints.md](./references/endpoints.md) and task sequences in
+[references/workflows.md](./references/workflows.md).
 
-Set these only when overriding the defaults:
+## Configure Only When Needed
+
+Only set these when overriding defaults:
 
 - `TUQU_BASE_URL=https://photo.tuqu.ai`
 - `TUQU_BILLING_BASE_URL=https://billing.tuqu.ai/dream-weaver`
 
-Do not rely on a shared credential environment variable. The agent must provide the credential explicitly on
-every authenticated request so multiple roles can use different service keys safely.
+Authenticated calls must pass `--service-key <role-service-key>` explicitly. Do not rely on a
+shared credential environment variable.
 
-Prefer `scripts/tuqu_request.py` over ad-hoc `curl` so host selection, auth, and JSON handling stay consistent.
+## Use These Command Patterns
 
-## Choose the Endpoint
-
-Follow this decision flow:
-
-1. Need available presets, template IDs, style IDs, or usage hints? Call `/api/catalog`.
-2. Need direct text or reference-image generation without preset logic? Optionally call `/api/enhance-prompt`, then call `/api/v2/generate-image`.
-3. Need template or style generation from a preset ID? Call `/api/catalog` first, prepare at least one source image, then call `/api/v2/apply-preset`.
-4. Need persistent characters or multi-character scene generation? Use `/api/characters`, optionally call `/api/enhance-prompt`, then call `/api/v2/generate-for-character`.
-5. Need prior outputs or audit trail data? Use `/api/history`.
-6. Need pricing or remaining credits? Use `/api/model-costs` and `/api/billing/balance`.
-7. User specified a model name or wants to know model pricing/coefficients? Call `/api/pricing-config` to list all available models and resolutions, then fuzzy-match the user's input to a valid `models[].id`.
-8. Need to top up a project's balance? Call `/api/v1/recharge/plans`, then `/api/v1/recharge/wechat` or `/api/v1/recharge/stripe`.
-
-Read [references/endpoints.md](references/endpoints.md) for exact request and response fields.
-Read [references/workflows.md](references/workflows.md) for end-to-end task recipes.
-
-## Follow Operating Rules
-
-- Verify the auth mode before every request. Even when the same credential backs multiple endpoints, `/api/v2/generate-for-character` still requires body `userKey`, `/api/characters` and `/api/history` still require `x-api-key`, and recharge endpoints still require bearer auth.
-- Verify the host before every request. Recharge endpoints live on `TUQU_BILLING_BASE_URL`, not `TUQU_BASE_URL`.
-- Provide the credential explicitly on every authenticated helper call with `--service-key <role-service-key>`, unless the workflow explicitly requires you to place it in the JSON body or query string.
-- Send JSON with `Content-Type: application/json`.
-- Send base64 images as full data URLs such as `data:image/jpeg;base64,...`, not raw base64 fragments.
-- Treat `/api/catalog` as the source of truth for `presetId`, preset type, and variable names. Do not guess placeholders.
-- For `/api/v2/apply-preset`, send at least one `sourceImages` or `sourceImageUrls` entry. Template presets treat them as face-reference images; style presets treat the first one as the image to transform.
-- Use `/api/model-costs` before overriding `modelId` on cost-sensitive jobs.
-- When the user specifies a model by name, call `/api/pricing-config` first and fuzzy-match against `models[].id` (strip spaces, underscores, hyphens, and lowercase before comparing; e.g. user input `nanobanana2` → matches `nanobanana_2`, `SeedDream5` → matches `seedream5`). Never guess a `modelId`; always resolve it from the pricing config response.
-- Use `ratio: "Original"` only when at least one reference image is present, because the server measures the first reference image.
-- Prefer `Authorization: Bearer <serviceKey>` for recharge endpoints. Use query or body fallback only when the caller cannot set headers.
-- Preserve `imageUrl`, `promptUsed`, `model`, `remainingBalance`, `transactionId`, and `historyItem` when the API returns them.
-- Preserve recharge checkout fields such as `orderId`, `unifpayOrderId`, `checkoutUrl`, `sessionId`, `qrcodeImg`, `codeUrl`, and `payUrl`.
-- Surface API error codes directly, especially `INVALID_REQUEST`, `UNAUTHORIZED`, `NOT_FOUND`, `INSUFFICIENT_BALANCE`, `GENERATION_FAILED`, `PAYMENT_NOT_CONFIGURED`, and `CURRENCY_NOT_SUPPORTED`.
-
-## Use the Request Helper
-
-Use the helper for repeatable API calls:
+List or query data:
 
 ```bash
 python3 scripts/tuqu_request.py GET /api/catalog --query type=all
 python3 scripts/tuqu_request.py GET /api/model-costs
 python3 scripts/tuqu_request.py GET /api/pricing-config
+```
+
+Send a small JSON body inline:
+
+```bash
 python3 scripts/tuqu_request.py POST /api/enhance-prompt \
   --json '{"category":"portrait","prompt":"soft editorial portrait with window light"}'
+```
+
+Send a larger payload from disk:
+
+```bash
 python3 scripts/tuqu_request.py POST /api/v2/generate-image \
   --service-key <role-service-key> \
   --body-file payloads/generate-image.json
-python3 scripts/tuqu_request.py GET /api/v1/recharge/plans \
+```
+
+Override helper defaults only with a documented reason:
+
+```bash
+python3 scripts/tuqu_request.py POST /api/custom-path \
+  --base-url https://photo.tuqu.ai \
+  --auth-mode user-key \
+  --service-key <role-service-key> \
+  --json '{"prompt":"example"}'
+```
+
+## Run Supported Tasks Through the Helper
+
+### Classify the Request First
+
+Before picking an endpoint, classify the user request into one of these buckets:
+
+1. Current-role selfie or portrait request:
+   `自拍`, `照片`, `写真`, `发张图`, or similar wording that implies the current role should be in frame
+2. Character-on-camera request:
+   the user explicitly wants the current role or a saved character to appear in the image
+3. Freestyle or edit-only request:
+   landscape, objects, scenery, atmosphere shots, or pure image editing without the current role
+
+If the request is ambiguous, decide whether the current role needs to appear in the final image.
+
+### Decide Whether the Current Role Must Appear
+
+- Treat `自拍` as current-role-on-camera by default.
+- `自拍` means the current role appears in the image. It does not mean a phone must be visible.
+- If the user asks for the role to be shown, keep identity-preserving generation.
+- If the request is for scenery, objects, mood boards, or edit-only transforms, do not force the
+  current role into the frame.
+- Do not ask the user for their own face photo unless they explicitly ask to put themselves in the
+  image.
+
+### Route by Subject Type
+
+Use identity-preserving routing when the current role must appear:
+
+- Selfie / portrait / role-on-camera requests -> `POST /api/v2/generate-for-character`
+- Freestyle / landscape / object / edit-only requests -> `POST /api/v2/generate-image`
+
+Keep all supported calls on `scripts/tuqu_request.py`.
+
+### Run Character Prechecks Before Identity-Preserving Generation
+
+When the current role must appear in the frame, enforce this order:
+
+1. Check whether the current role already has a Tuqu character.
+2. If not, create the character first through `/api/characters`.
+3. Check balance through `/api/billing/balance`.
+4. Only then call `/api/v2/generate-for-character`.
+
+Helper sequence:
+
+```bash
+python3 scripts/tuqu_request.py GET /api/characters --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/characters \
+  --service-key <role-service-key> \
+  --body-file payloads/create-character.json
+python3 scripts/tuqu_request.py POST /api/billing/balance --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/v2/generate-for-character \
+  --service-key <role-service-key> \
+  --body-file payloads/generate-for-character.json
+```
+
+Use the create-character step only when the current role does not already have a usable Tuqu
+character.
+
+### Apply Default Selfie Behavior
+
+- For a normal selfie, default to a front-camera composition with the current role in frame.
+- Do not show the phone by default.
+- Show the phone only when the user explicitly asks for a mirror selfie, visible phone, or similar
+  framing.
+- If the user only says `自拍` or `发张图`, assume the goal is a natural current-role portrait rather
+  than a literal handheld-phone shot.
+
+### Discover presets, models, and pricing
+
+```bash
+python3 scripts/tuqu_request.py GET /api/catalog --query type=all
+python3 scripts/tuqu_request.py GET /api/model-costs
+python3 scripts/tuqu_request.py GET /api/pricing-config
+```
+
+Use `/api/pricing-config` before accepting a user-supplied model name. Match the requested model
+to a real `models[].id`, then use that `modelId` in later generation payloads.
+
+### Improve a prompt
+
+```bash
+python3 scripts/tuqu_request.py POST /api/enhance-prompt \
+  --json '{"category":"portrait","prompt":"soft editorial portrait with window light"}'
+```
+
+### Generate from prompt or reference images
+
+```bash
+python3 scripts/tuqu_request.py POST /api/v2/generate-image \
+  --service-key <role-service-key> \
+  --body-file payloads/generate-image.json
+```
+
+Example `payloads/generate-image.json`:
+
+```json
+{
+  "prompt": "cinematic portrait in warm sunset light",
+  "referenceImageUrls": ["https://example.com/reference.jpg"],
+  "resolution": "2K",
+  "ratio": "Original",
+  "modelId": "seedream45"
+}
+```
+
+### Apply a preset
+
+```bash
+python3 scripts/tuqu_request.py GET /api/catalog --query type=all
+python3 scripts/tuqu_request.py POST /api/v2/apply-preset \
+  --service-key <role-service-key> \
+  --body-file payloads/apply-preset.json
+```
+
+### Manage characters
+
+```bash
+python3 scripts/tuqu_request.py GET /api/characters --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/characters \
+  --service-key <role-service-key> \
+  --body-file payloads/create-character.json
+python3 scripts/tuqu_request.py PUT /api/characters/<character-id> \
+  --service-key <role-service-key> \
+  --body-file payloads/update-character.json
+python3 scripts/tuqu_request.py DELETE /api/characters/<character-id> \
   --service-key <role-service-key>
+```
+
+### Generate with saved characters
+
+```bash
+python3 scripts/tuqu_request.py GET /api/characters --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/billing/balance --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/v2/generate-for-character \
+  --service-key <role-service-key> \
+  --body-file payloads/generate-for-character.json
+```
+
+Optionally refine the scene prompt first with `/api/enhance-prompt`. When the request is a selfie
+or other current-role portrait, make sure the character check and balance check happen before the
+generation call.
+
+### Inspect history and balance
+
+```bash
+python3 scripts/tuqu_request.py GET /api/history --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/history \
+  --service-key <role-service-key> \
+  --body-file payloads/history-item.json
+python3 scripts/tuqu_request.py DELETE /api/history/<history-id> --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/billing/balance --service-key <role-service-key>
+```
+
+### Start a recharge flow
+
+```bash
+python3 scripts/tuqu_request.py GET /api/v1/recharge/plans --service-key <role-service-key>
+python3 scripts/tuqu_request.py POST /api/v1/recharge/wechat \
+  --service-key <role-service-key> \
+  --json '{"planId":"698b7fead4c733c85f2a9c74"}'
 python3 scripts/tuqu_request.py POST /api/v1/recharge/stripe \
   --service-key <role-service-key> \
   --json '{"planId":"698b7fead4c733c85f2a9c74","successUrl":"https://your-app.com/payment/success","cancelUrl":"https://your-app.com/payment/cancel"}'
 ```
 
-The helper auto-detects both host and auth for the supported endpoints in this skill. Pass `--service-key` on every authenticated call. Override with `--base-url` or `--auth-mode` only when you have a documented reason.
+## Operating Rules
 
-## Handle Common Tasks
-
-### Generate from prompt or references
-
-1. Optionally call `/api/enhance-prompt` when the user prompt is vague.
-2. Call `/api/v2/generate-image` with `prompt`, `referenceImages`, `referenceImageUrls`, or a combination.
-3. Return the `imageUrl` and any balance or transaction metadata.
-
-### Generate from a preset
-
-1. Call `/api/catalog` and pick a valid preset.
-2. Inspect whether the preset is a `template` or a `style`.
-3. Provide at least one `sourceImages` or `sourceImageUrls` entry.
-4. Fill `variableValues` only with the preset's defined placeholders.
-5. Call `/api/v2/apply-preset`.
-
-### Generate with saved characters
-
-1. Create or look up characters through `/api/characters`.
-2. Optionally enhance the scene prompt with `/api/enhance-prompt`.
-3. Call `/api/v2/generate-for-character`.
-4. Save or expose the returned `historyItem` when present.
-
-### Resolve model ID and check pricing
-
-1. Call `GET /api/pricing-config` (no auth required). The response contains `basePoints`, a `models` array, and a `resolutions` array.
-2. Each model entry has `id` (the value to pass as `modelId`), `label`/`labelEn` (display names), `seriesId`/`seriesName` (model family), and `coefficient` (point multiplier relative to `basePoints`).
-3. Each resolution entry has `id` (e.g. `1K`, `2K`, `4K`) and its own `coefficient`.
-4. To fuzzy-match a user-supplied model name: normalize both the input and every `models[].id` by lowercasing and stripping all non-alphanumeric characters, then pick the closest match. Examples: `nanobanana2` → `nanobanana_2`, `seedream 4.5` → `seedream45`.
-5. Compute the estimated point cost as `basePoints × model.coefficient × resolution.coefficient`.
-6. If no model matches after normalization, list the available models from the response and ask the user to clarify.
-
-### Inspect balance and history
-
-1. Call `/api/billing/balance` before expensive jobs when the user asks about credits.
-2. Call `/api/history` when the user asks for recent generations or to reconcile results.
-
-### Recharge with WeChat or Stripe
-
-1. Call `/api/v1/recharge/plans` to list valid `planId` values for the project bound to the service key.
-2. If the user wants a WeChat QR payment, call `/api/v1/recharge/wechat` and return `qrcodeImg`, `codeUrl`, and `payUrl`.
-3. If the user wants a card or Stripe-hosted checkout, call `/api/v1/recharge/stripe` and return `checkoutUrl`, `sessionId`, and `qrcodeImg`.
-4. Keep `orderId` or `sessionId` in the response you surface; they are the primary support and reconciliation handles.
-
-## Recover from Failures
-
-- On `INSUFFICIENT_BALANCE`, stop and report the remaining balance if available.
-- On `INVALID_REQUEST`, compare the payload against [references/endpoints.md](references/endpoints.md) and call out the missing field explicitly.
-- On `NOT_FOUND` from `/api/v2/apply-preset`, re-run `/api/catalog`; the `presetId` is wrong or no longer active.
-- On `UNAUTHORIZED`, verify whether the endpoint expects body `userKey`, header `x-api-key`, or bearer `serviceKey`, and verify that the caller supplied the intended role-specific credential.
-- On recharge `UNAUTHORIZED`, verify the service key has not been revoked or frozen and that you are sending it to the billing host.
-- On `PAYMENT_NOT_CONFIGURED`, report which channel is missing at the project or global config layer.
-- On `CURRENCY_NOT_SUPPORTED`, stop and explain that WeChat only supports direct `CNY` or `JPY`, plus `USD` via project FX conversion.
-- On `GENERATION_FAILED`, report whether the response says the request was refunded.
+- Use `scripts/tuqu_request.py` instead of ad-hoc `curl` for supported endpoints.
+- Classify the request before routing it: current-role selfie/portrait, role-on-camera, or
+  freestyle/edit-only.
+- Route identity-preserving requests to `/api/v2/generate-for-character`.
+- Route freestyle or edit-only requests to `/api/v2/generate-image`.
+- When the current role must appear, ensure a Tuqu character exists first, then check balance,
+  then generate.
+- Pass `--service-key` on every authenticated helper call.
+- Use `--body-file` for large JSON payloads, especially generation and preset payloads.
+- Treat `/api/catalog` as the source of truth for `presetId`, preset type, and preset variables.
+- Use `/api/pricing-config` to resolve user-supplied model names before setting `modelId`.
+- Treat ordinary `自拍` as front-camera composition with the current role visible and the phone not
+  visible unless explicitly requested.
+- Do not ask the user for their face photo unless they explicitly ask to place themselves in the
+  image.
+- Keep raw error payloads visible when troubleshooting; the helper already prints JSON responses.
+- Read [TUQU_API.md](./TUQU_API.md) before overriding helper defaults or diagnosing auth/host issues.

@@ -131,26 +131,33 @@ Keep local notes in \`TOOLS.md\`. Shared routing rules, if present, live in \`..
 
 ### Service Key
 
-TUQU API calls need the service key from \`tuqu_service_key.txt\` in this workspace. If missing, guide the user to register at the TuQu billing page or configure it in the UI's TuQu settings.
+TUQU script calls need the service key from \`tuqu_service_key.txt\` in this workspace. If missing, guide the user to register at the TuQu billing page or configure it in the UI's TuQu settings.
 
 ### Media Rules
 
 - Send the remote TUQU image URL directly as a media attachment. Do not download to local files.
-- After each TUQU API call, log key info (endpoint, imageUrl, balance, transactionId) in \`memory/YYYY-MM-DD.md\`.
+- After each TUQU script call, log key info (script action, imageUrl, balance, transactionId) in \`memory/YYYY-MM-DD.md\`.
 
 ### TUQU Workflow
 
-- Treat 自拍、拍照、写真、发张图 and similar requests as executable image requests, not just casual chat.
-- If the requested image should show you, first ensure your own TUQU character exists. If you have a service key but no character ID yet, create your TUQU character from your profile image and role data before continuing.
-- Before any TUQU image generation, check the remaining balance. If balance is low or empty, remind the user and help them recharge.
-- If the image is your own selfie / portrait / a scene where you are visibly in frame, prefer \`/api/v2/generate-for-character\`.
-- If the image is scenery, objects, edits, templates, or anything where you are not visibly in frame, prefer \`/api/v2/generate-image\`.
+- Treat 自拍、拍照、写真、发张图、角色出镜 and similar requests as executable image requests, not casual chat.
+- Classify each request first: current-role selfie/portrait, character-on-camera, or freestyle/edit-only.
+- If your current role must appear in frame, enforce this order:
+  1) run character list via \`skills/tuqu-photo-skill/scripts/tuqu_request.py\`
+  2) create character via the same script when missing
+  3) run balance check via the same script
+  4) run character-preserving generation via the same script
+- If your current role does not need to appear (scenery, objects, mood, edit-only), run freestyle generation via \`skills/tuqu-photo-skill/scripts/tuqu_request.py\`.
+- For normal 自拍, default to front-camera composition with your role in frame and no visible phone unless the user explicitly asks mirror selfie / visible phone framing.
+- Do not ask for the user's own face photo unless the user explicitly asks to put themselves in the image.
+- Always run TUQU requests through \`skills/tuqu-photo-skill/scripts/tuqu_request.py\` and pass \`--service-key <role-service-key>\` explicitly for authenticated calls.
+- When the user asks for a model by name, resolve it through the pricing/model lookup commands in the same script and use a real model id.
 - If you create or learn a TUQU character for someone who should appear with you in future photos, add or update them in \`ASSOCIATES.json\`.
 - If the user wants a new person in frame and you cannot find them in \`ASSOCIATES.json\`, ask for a clear reference photo first so you can create their TUQU character.
 
 ### Image Generation
 
-When generating an image for a character (e.g., via TUQU API), you MUST first use the following logic to generate a "Prompt for Generating the Image":
+When generating an image for a character (e.g., via TUQU script flow), you MUST first use the following logic to generate a "Prompt for Generating the Image":
 
 - Use the character's details (SOUL.md) and current scene context.
 - Follow the rules: Chinese only, 150-400 words, high visual detail (lighting, lens, textures), cinematic and vivid style.
@@ -179,19 +186,21 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 
 | Task type | Where to look |
 |-----------|---------------|
-| The current character's own selfie / portrait / visible-in-frame photo | Ensure TUQU character exists, check balance, then use \`/api/v2/generate-for-character\` |
-| Scenery, objects, image edits, templates, or styles without the current character in frame | Check balance, then use \`/api/v2/generate-image\` |
-| Balance checks and recharge | \`/api/billing/balance\` then \`/api/v1/recharge/*\` |
-| Low-level TUQU API reference | \`~/.openclaw/skills/tuqu-photo-skill/SKILL.md\` |
+| The current character's own selfie / portrait / visible-in-frame photo | Use \`skills/tuqu-photo-skill/scripts/tuqu_request.py\` for character list -> create when missing -> balance check -> character-preserving generation |
+| Character-on-camera request | If current role must appear, use the same script-based identity-preserving flow |
+| Scenery, objects, image edits, templates, or styles without the current character in frame | Use \`skills/tuqu-photo-skill/scripts/tuqu_request.py\` for freestyle generation (check balance first when needed) |
+| Balance checks and recharge | Use \`skills/tuqu-photo-skill/scripts/tuqu_request.py\` balance and recharge commands |
+| Model selection by user-supplied name | Use \`skills/tuqu-photo-skill/scripts/tuqu_request.py\` pricing/model lookup, map to real model id, then generate |
+| Low-level TUQU script reference | \`~/.openclaw/skills/tuqu-photo-skill/SKILL.md\` |
 | Discord gateway issues | \`openclaw-gateway-recovery/SKILL.md\` |
 | Everything else | Use native tools directly |
 
 ## Selfie Rules
 
 - If the user asks for the current character's own 自拍、照片、写真、发张图, generate that character's photo.
-- If the current character should appear in frame, create the current character's TUQU character first when it is missing, then check balance before generation.
-- Treat 自拍 / 角色出镜 requests as identity-preserving jobs and route them to \`/api/v2/generate-for-character\`.
-- Treat scenery / object / edit-only jobs as freestyle jobs and route them to \`/api/v2/generate-image\`.
+- If the current character should appear in frame, strictly run via \`skills/tuqu-photo-skill/scripts/tuqu_request.py\`: list characters -> create when missing -> check balance -> character-preserving generation.
+- Treat 自拍 / 角色出镜 requests as identity-preserving jobs and run the script's character-preserving generation workflow.
+- Treat scenery / object / edit-only jobs as freestyle jobs and run the script's freestyle generation workflow.
 - Do not ask for the user's face photo unless the user explicitly wants themselves to appear in the image.
 - Treat 自拍 as image-generation ability, not literal phone ownership.
 - For a normal 自拍, default to front-camera framing with the device out of frame unless the user explicitly wants a mirror shot or visible phone.
@@ -207,16 +216,16 @@ Shared task-routing rules for OpenClaw character workspaces. Read this when the 
 ## Media Rules
 
 - Send remote TUQU image URLs directly as media attachments. Do not download them to local files first.
-- After each TUQU API call, log key info in \`memory/YYYY-MM-DD.md\`.
+- After each TUQU script call, log key info in \`memory/YYYY-MM-DD.md\`.
 
 ## Prompt Design
 
-When you need to generate a new image prompt for the TUQU API, use these optimization rules to construct the final Chinese prompt string:
+When you need to generate a new image prompt for the TUQU script workflow, use these optimization rules to construct the final Chinese prompt string:
 
 1. **Focus:** Character (name, age, features, outfit, mood) + Scene (location, action, lighting, vibe).
 2. **Style:** Cinematic, vivid, high-quality, and detailed. Avoid simple keyword stacking; use natural but descriptive language.
 3. **Refinement:** Include specific visual details like lens choice, lighting direction, background depth, and textures.
-4. **Length:** Aim for 150-400 characters (max 500).
+4. **Length:** Aim for 150-400 words in Chinese.
 5. **Output:** Return ONLY the final Chinese prompt string. No headers, quotes, or explanations.
 `;
 }

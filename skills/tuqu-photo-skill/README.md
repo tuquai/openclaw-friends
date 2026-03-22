@@ -1,6 +1,7 @@
 # Tuqu Photo API Skill
 
-A local skill package for working with the Tuqu Dream Weaver photo and billing APIs, with a Python helper for consistent request handling.
+A local skill package for working with the Tuqu Dream Weaver photo and billing APIs through a
+Python helper that keeps host selection, auth mapping, and JSON handling consistent.
 
 ## Quick Start
 
@@ -27,19 +28,23 @@ python3 scripts/tuqu_request.py POST /api/billing/balance \
   --service-key <role-service-key>
 ```
 
-The helper auto-selects the correct host and authentication mode for the supported endpoints.
+The helper auto-selects the correct host and authentication mode for the supported endpoints,
+including `/api/pricing-config`.
 
 ## Features
 
-- Covers Tuqu photo generation, preset application, prompt enhancement, catalog lookup, character management, history, balance, and recharge flows
-- Encodes the host and auth rules that are easy to get wrong when calling the APIs manually
-- Includes endpoint-level reference docs and workflow recipes for common tasks
+- Covers Tuqu photo generation, preset application, prompt enhancement, catalog lookup, character
+  management, history, balance, pricing config lookup, and recharge flows
+- Keeps the main `SKILL.md` helper-first so common tasks are expressed as
+  `scripts/tuqu_request.py` commands
+- Stores API semantics separately in `TUQU_API.md`
 - Ships a small Python request helper for repeatable local testing
 
 ## Repository Layout
 
 ```text
 SKILL.md                    Main skill instructions
+TUQU_API.md                 API-specific host/auth/task guidance
 references/
   endpoints.md              Endpoint request and response details
   workflows.md              Task-oriented API workflows
@@ -48,7 +53,7 @@ scripts/
 tests/
   test_tuqu_request.py      Helper unit tests
 dist/
-  tuqu-photo-skill.skill      Generated skill artifact
+  tuqu-photo-api.skill      Generated skill artifact
 ```
 
 ## Configuration
@@ -64,24 +69,40 @@ credential from the environment. The helper maps that value to `userKey`, `x-api
 
 ## Common Tasks
 
-- Discover presets and styles: `GET /api/catalog`
-- Improve a prompt before generation: `POST /api/enhance-prompt`
-- Generate from text or reference images: `POST /api/v2/generate-image`
-- Generate from a preset with source images: `GET /api/catalog` then `POST /api/v2/apply-preset`
-- Generate with saved characters: `/api/characters` then `POST /api/v2/generate-for-character`
-- Check credits: `POST /api/billing/balance`
-- Start a recharge flow: `GET /api/v1/recharge/plans`, then `POST /api/v1/recharge/wechat` or `POST /api/v1/recharge/stripe`
+- Discover presets and styles:
+  `python3 scripts/tuqu_request.py GET /api/catalog --query type=all`
+- Improve a prompt before generation:
+  `python3 scripts/tuqu_request.py POST /api/enhance-prompt --json '{"category":"portrait","prompt":"..."}'`
+- Generate from text or reference images:
+  `python3 scripts/tuqu_request.py POST /api/v2/generate-image --service-key <role-service-key> --body-file payloads/generate-image.json`
+- Generate from a preset with source images:
+  `python3 scripts/tuqu_request.py GET /api/catalog --query type=all`, then
+  `python3 scripts/tuqu_request.py POST /api/v2/apply-preset --service-key <role-service-key> --body-file payloads/apply-preset.json`
+- Generate with saved characters:
+  `python3 scripts/tuqu_request.py GET /api/characters --service-key <role-service-key>`, then
+  `python3 scripts/tuqu_request.py POST /api/v2/generate-for-character --service-key <role-service-key> --body-file payloads/generate-for-character.json`
+- Check credits:
+  `python3 scripts/tuqu_request.py POST /api/billing/balance --service-key <role-service-key>`
+- Resolve model names and pricing:
+  `python3 scripts/tuqu_request.py GET /api/model-costs` and
+  `python3 scripts/tuqu_request.py GET /api/pricing-config`
+- Start a recharge flow:
+  `python3 scripts/tuqu_request.py GET /api/v1/recharge/plans --service-key <role-service-key>`,
+  then `python3 scripts/tuqu_request.py POST /api/v1/recharge/wechat --service-key <role-service-key> --json '{"planId":"..."}'`
+  or `python3 scripts/tuqu_request.py POST /api/v1/recharge/stripe --service-key <role-service-key> --json '{"planId":"...","successUrl":"...","cancelUrl":"..."}'`
 
 ## Documentation
 
 - [Skill instructions](./SKILL.md)
+- [API notes](./TUQU_API.md)
 - [Endpoint reference](./references/endpoints.md)
 - [Workflow recipes](./references/workflows.md)
 
 ## Development Notes
 
 - Use `scripts/tuqu_request.py` instead of ad-hoc `curl` when possible.
-- Keep the endpoint/auth rules in `SKILL.md` aligned with the helper logic in `scripts/tuqu_request.py`.
+- Keep `SKILL.md` focused on helper operations and keep API semantics in `TUQU_API.md`.
+- Keep the helper's supported path list aligned with the documented capabilities.
 - Keep credential handling explicit per request so multiple roles can use different service keys safely.
 - Treat `dist/` as generated output.
 

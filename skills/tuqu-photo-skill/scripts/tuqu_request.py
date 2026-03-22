@@ -23,6 +23,7 @@ ENDPOINT_RULES = (
     ("/api/enhance-prompt", "none", "TUQU_BASE_URL", "https://photo.tuqu.ai"),
     ("/api/catalog", "none", "TUQU_BASE_URL", "https://photo.tuqu.ai"),
     ("/api/model-costs", "none", "TUQU_BASE_URL", "https://photo.tuqu.ai"),
+    ("/api/pricing-config", "none", "TUQU_BASE_URL", "https://photo.tuqu.ai"),
     (
         "/api/v1/recharge/plans",
         "service-key",

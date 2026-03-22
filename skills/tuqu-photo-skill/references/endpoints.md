@@ -11,6 +11,7 @@
 - [`/api/enhance-prompt`](#apienhance-prompt)
 - [`/api/catalog`](#apicatalog)
 - [`/api/model-costs`](#apimodel-costs)
+- [`/api/pricing-config`](#apipricing-config)
 - [`/api/characters`](#apicharacters)
 - [`/api/history`](#apihistory)
 - [`/api/billing/balance`](#apibillingbalance)
@@ -37,6 +38,7 @@
 | `/api/enhance-prompt` | `POST` | none | Returns text only |
 | `/api/catalog` | `GET` | none | Public preset and usage discovery |
 | `/api/model-costs` | `GET` | none | Public model pricing map |
+| `/api/pricing-config` | `GET` | none | Public model and resolution coefficients for resolving `modelId` values |
 | `/api/characters` | `GET/POST/PUT/DELETE` | `x-api-key` header or `Authorization: Bearer` | Persistent character store |
 | `/api/history` | `GET/POST/DELETE` | `x-api-key` header or `Authorization: Bearer` | Recent generations and manual history entries |
 | `/api/billing/balance` | `POST` | body `userKey` | Returns remaining token balance |
@@ -285,6 +287,42 @@ Success payload shape:
 ```
 
 Use this response before overriding `modelId` on costly jobs.
+
+## `/api/pricing-config`
+
+- Method: `GET`
+- Auth: none
+- Purpose: resolve user-supplied model names to valid `modelId` values and inspect pricing coefficients
+
+Success payload shape:
+
+```json
+{
+  "basePoints": 10,
+  "models": [
+    {
+      "id": "seedream45",
+      "label": "Seedream 4.5",
+      "labelEn": "Seedream 4.5",
+      "seriesId": "seedream",
+      "seriesName": "Seedream",
+      "coefficient": 1
+    }
+  ],
+  "resolutions": [
+    {
+      "id": "2K",
+      "coefficient": 1
+    }
+  ]
+}
+```
+
+Use this response to:
+
+- resolve a user-provided model name to a real `models[].id`
+- estimate cost with `basePoints * model.coefficient * resolution.coefficient`
+- present valid models and resolutions back to the user when the request is ambiguous
 
 ## `/api/characters`
 

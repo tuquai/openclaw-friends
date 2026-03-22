@@ -17,6 +17,7 @@
 | --- | --- |
 | Discover available presets or styles | `GET /api/catalog` |
 | Estimate model cost | `GET /api/model-costs` |
+| Resolve a user-provided model name | `GET /api/pricing-config` |
 | Improve a vague prompt | `POST /api/enhance-prompt` |
 | Generate from text or references | `POST /api/v2/generate-image` |
 | Generate from a preset | `GET /api/catalog` -> `POST /api/v2/apply-preset` with source images |
@@ -34,9 +35,10 @@ Use this workflow for free-form generation without preset logic.
 
 1. Decide whether the prompt needs refinement.
 2. If needed, call `/api/enhance-prompt` with a `category` and the raw user prompt.
-3. Optionally call `/api/model-costs` if the user cares about cost or asks to choose a model.
-4. Call `/api/v2/generate-image`.
-5. Return `imageUrl`, `promptUsed`, `model`, `remainingBalance`, and `transactionId`.
+3. Optionally call `/api/model-costs` if the user cares about cost.
+4. Call `/api/pricing-config` if the user supplied a model name and you need a valid `modelId`.
+5. Call `/api/v2/generate-image`.
+6. Return `imageUrl`, `promptUsed`, `model`, `remainingBalance`, and `transactionId`.
 
 Example body:
 
@@ -60,7 +62,8 @@ Use this workflow when the user wants a known template or style.
 4. Add at least one `sourceImages` or `sourceImageUrls` entry.
 5. Build `variableValues` with the exact placeholder names the preset expects.
 6. Optionally call `/api/model-costs` before overriding `modelId`.
-7. Call `/api/v2/apply-preset`.
+7. Call `/api/pricing-config` if the user supplied a model name and you need a valid `modelId`.
+8. Call `/api/v2/apply-preset`.
 
 Example body:
 
